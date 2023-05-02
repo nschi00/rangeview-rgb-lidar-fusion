@@ -22,7 +22,7 @@ train:
     lr_decay: 0.99       # learning rate decay per epoch after initial cycle (from min lr)
   momentum: 0.9          # sgd momentum
   w_decay: 0.0001        # weight decay
-  batch_size: 6          # batch size
+  batch_size: 2          # batch size
   report_batch: 10      # every x batches, report loss
   report_epoch: 50        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
