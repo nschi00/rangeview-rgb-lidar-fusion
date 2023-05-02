@@ -236,11 +236,10 @@ class Fusion(nn.Module):
         self.processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-panoptic")
         self.mask2former = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-panoptic")
 
-        self.pool_mask = nn.MaxPool2d(kernel_size=(2,1), stride=(2,1))
-        self.conv_fusion1 = BasicConv2d(384, 128, kernel_size=3, padding=1)
-        self.conv_fusion2 = BasicConv2d(384, 128, kernel_size=3, padding=1)
-        self.conv_fusion3 = BasicConv2d(384, 128, kernel_size=3, padding=1)
-        self.conv_fusion4 = BasicConv2d(384, 128, kernel_size=3, padding=1)
+        self.conv_fusion1 = BasicConv2d(384, 128, kernel_size=1)
+        self.conv_fusion2 = BasicConv2d(384, 128, kernel_size=1)
+        self.conv_fusion3 = BasicConv2d(384, 128, kernel_size=1)
+        self.conv_fusion4 = BasicConv2d(384, 128, kernel_size=1)
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -277,26 +276,24 @@ class Fusion(nn.Module):
         rgb_input = self.processor(images=list(rgb), return_tensors="pt").to(self.device)
         with torch.no_grad():
             mask2former_results = self.mask2former(**rgb_input, output_hidden_states=True)
-            ## outputs feature maps of width/height 12x12, 24x24, 48x48, (bs, 256, 96, 96)
-
-        m =  self.pool_mask(mask2former_results['pixel_decoder_last_hidden_state'])
-        m = F.pad(m, (208, 208, 8, 8), "constant", 0)
-        m_1 = F.pad(mask2former_results['pixel_decoder_hidden_states'][2], (232, 232, 8, 8),  "constant", 0)
-        m_2 = F.pad(mask2former_results['pixel_decoder_hidden_states'][1], (116, 116, 4, 4),  "constant", 0)
-        m_3 = F.pad(mask2former_results['pixel_decoder_hidden_states'][0], (58, 58, 2, 2), "constant", 0)
-
+            ## outputs feature maps of width/height 12x12, 24x24, 48x48, (bs, 256, 96, 96)       
+        
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)    # (bs, 128, 64, 512)
-        x = self.conv_fusion1(torch.cat((x, m), dim=1))
 
         x_1 = self.layer1(x)  # 1      (bs, 128, 64, 512)
-        x_1 = self.conv_fusion2(torch.cat((x_1, m_1), dim=1))
+        m_1 = F.interpolate(mask2former_results['pixel_decoder_last_hidden_state'], size=x_1.size()[2:], mode='bilinear', align_corners=True)
+        x_1 = self.conv_fusion1(torch.cat((x_1, m_1), dim=1))
         x_2 = self.layer2(x_1)  # 1/2  (bs, 128, 32, 256)
-        x_2 = self.conv_fusion3(torch.cat((x_2, m_2), dim=1))
+        m_2 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][2], size=x_2.size()[2:], mode='bilinear', align_corners=True)
+        x_2 = self.conv_fusion2(torch.cat((x_2, m_2), dim=1))
         x_3 = self.layer3(x_2)  # 1/4  (bs, 128, 16, 128)
-        x_3 = self.conv_fusion4(torch.cat((x_3, m_3), dim=1))
+        m_3 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][1], size=x_3.size()[2:], mode='bilinear', align_corners=True)
+        x_3 = self.conv_fusion3(torch.cat((x_3, m_3), dim=1))
         x_4 = self.layer4(x_3)  # 1/8  (bs, 128, 8, 64)
+        m_4 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][0], size=x_4.size()[2:], mode='bilinear', align_corners=True)
+        x_4 = self.conv_fusion4(torch.cat((x_4, m_4), dim=1))
 
         res_2 = F.interpolate(x_2, size=x.size()[2:], mode='bilinear', align_corners=True)
         res_3 = F.interpolate(x_3, size=x.size()[2:], mode='bilinear', align_corners=True)
