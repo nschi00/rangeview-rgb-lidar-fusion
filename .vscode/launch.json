@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "args": ["-d", "/media/nico/TOSHIBA EXT/SemanticKITTI/dataset", "-ac", "config/arch/fusion-mask2former-512.yml", "-n", "cenet_mask2former"]
         }
     ]
 }
