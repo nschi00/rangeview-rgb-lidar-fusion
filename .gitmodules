@@ -1,3 +1,6 @@
 [submodule "third_party/SwinFusion"]
 	path = third_party/SwinFusion
 	url = https://github.com/Linfeng-Tang/SwinFusion.git
+[submodule "third_party/Mask2Former"]
+	path = third_party/Mask2Former
+	url = https://github.com/facebookresearch/Mask2Former.git
