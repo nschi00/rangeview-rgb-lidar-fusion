@@ -374,7 +374,7 @@ class Parser():
     g = torch.Generator()
     g.manual_seed(1024)
 #                                                    #sampler=train_sampler,
-
+    self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=self.shuffle_train,
@@ -394,7 +394,7 @@ class Parser():
                                        sensor=self.sensor,
                                        max_points=max_points,
                                        gt=self.gt)
-
+    self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=False,
