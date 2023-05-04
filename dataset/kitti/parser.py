@@ -332,7 +332,8 @@ class Parser():
                batch_size,        # batch size for train and val
                workers,           # threads to load data
                gt=True,           # get gt?
-               shuffle_train=True):  # shuffle training set?
+               shuffle_train=True,
+               overfit = False):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -365,6 +366,16 @@ class Parser():
                                        max_points=max_points,
                                        transform=True,
                                        gt=self.gt)
+    
+    self.valid_dataset = SemanticKitti(root=self.root,
+                                       sequences=self.valid_sequences,
+                                       labels=self.labels,
+                                       color_map=self.color_map,
+                                       learning_map=self.learning_map,
+                                       learning_map_inv=self.learning_map_inv,
+                                       sensor=self.sensor,
+                                       max_points=max_points,
+                                       gt=self.gt)
 
 
     def seed_worker(worker_id):
@@ -373,8 +384,11 @@ class Parser():
         random.seed(worker_seed)
     g = torch.Generator()
     g.manual_seed(1024)
-#                                                    #sampler=train_sampler,
-    self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
+
+    if overfit:
+      self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
+      self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
+
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=self.shuffle_train,
@@ -385,15 +399,7 @@ class Parser():
     assert len(self.trainloader) > 0
     self.trainiter = iter(self.trainloader)
 
-    self.valid_dataset = SemanticKitti(root=self.root,
-                                       sequences=self.valid_sequences,
-                                       labels=self.labels,
-                                       color_map=self.color_map,
-                                       learning_map=self.learning_map,
-                                       learning_map_inv=self.learning_map_inv,
-                                       sensor=self.sensor,
-                                       max_points=max_points,
-                                       gt=self.gt)
+    
     self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                    batch_size=self.batch_size,

@@ -80,7 +80,8 @@ class Trainer():
                                           batch_size=self.ARCH["train"]["batch_size"],
                                           workers=self.ARCH["train"]["workers"],
                                           gt=True,
-                                          shuffle_train=True)
+                                          shuffle_train=True,
+                                          overfit= self.ARCH["train"]["overfit"])
 
         # weights for loss (and bias)
 
@@ -91,8 +92,6 @@ class Trainer():
             content[x_cl] += freq
         self.loss_w = 1 / (content + epsilon_w)  # get weights
 
-#         power_value = 0.25
-#         self.loss_w = np.power(self.loss_w, power_value) * np.power(10, 1 - power_value)
 
         for x_cl, w in enumerate(self.loss_w):  # ignore the ones necessary to ignore
             if DATA["learning_ignore"][x_cl]:
@@ -167,10 +166,6 @@ class Trainer():
             self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
-#         self.optimizer = optim.AdamW(self.model.parameters(), lr=0.0001, weight_decay=0.0005)
-#         from modules.adam_policy import MyLR
-#         self.scheduler = MyLR(optimizer=self.optimizer, cycle=30)
-#         print(self.optimizer)
 
         if self.ARCH["train"]["scheduler"] == "consine":
             length = self.parser.get_train_size()
@@ -404,32 +399,27 @@ class Trainer():
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                if self.ARCH["train"]["aux_loss"]:
-                    if 'fusion' in self.ARCH["train"]["pipeline"]:
-                        out = model(in_vol,rgb_data) #[output, z2, z4, z8]
-                    else:
-                        out = model(in_vol)
-                    lamda = self.ARCH["train"]["lamda"]
-
-                    ## SUM POSITION LOSSES
-                    for j in range(len(out)):
-                        if j == 0:
-                            bdlosss = self.bd(out[j], proj_labels.long())
-                            loss_mn = criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
-                        else:
-                            bdlosss += lamda*self.bd(out[j], proj_labels.long())
-                            loss_mn += lamda*criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
-
-                    loss_m = loss_mn + bdlosss
-                    output = out[0]
+                if 'fusion' in self.ARCH["train"]["pipeline"]:
+                    out = model(in_vol,rgb_data) #[output, z2, z4, z8]
                 else:
-                    if 'fusion' in self.ARCH["train"]["pipeline"]:
-                        output = model(in_vol,rgb_data)
-                    else:
-                        output = model(in_vol)
-                    bdlosss = self.bd(output, proj_labels.long())
-                    loss_m = criterion(torch.log(output.clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(output, proj_labels.long()) + bdlosss
+                    out = model(in_vol)
+                lamda = self.ARCH["train"]["lamda"]
 
+                if type(out) is not list: # IN CASE OF SINGLE OUTPUT
+                    out = [out]
+
+                ## SUM POSITION LOSSES
+                for j in range(len(out)):
+                    if j == 0:
+                        bdlosss = self.bd(out[j], proj_labels.long())
+                        loss_mn = criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                    else:
+                        bdlosss += lamda*self.bd(out[j], proj_labels.long())
+                        loss_mn += lamda*criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+
+                loss_m = loss_mn + bdlosss
+                output = out[0]
+               
             optimizer.zero_grad()
             scaler.scale(loss_m.sum()).backward()
             scaler.step(optimizer)
@@ -442,7 +432,10 @@ class Trainer():
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
-                jaccard, class_jaccard = evaluator.getIoUMissingClass()
+                if self.ARCH["train"]["overfit"]:
+                    jaccard, class_jaccard = evaluator.getIoUMissingClass()
+                else:
+                    jaccard, class_jaccard = evaluator.getIoU()
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -500,7 +493,7 @@ class Trainer():
                     estim=self.calculate_estimate(epoch, i)))
             # step scheduler
             scheduler.step()
-#         scheduler.step()
+
         return acc.avg, iou.avg, losses.avg
 
     def validate(self, val_loader, model, criterion, evaluator, class_func, color_fn, save_scans):
