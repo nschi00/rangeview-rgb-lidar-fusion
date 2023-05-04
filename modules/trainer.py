@@ -442,7 +442,7 @@ class Trainer():
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
-                jaccard, class_jaccard = evaluator.getIoU()
+                jaccard, class_jaccard = evaluator.getIoUMissingClass()
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -570,7 +570,7 @@ class Trainer():
                 end = time.time()
 
             accuracy = evaluator.getacc()
-            jaccard, class_jaccard = evaluator.getIoU()
+            jaccard, class_jaccard = evaluator.getIoUMissingClass()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 
