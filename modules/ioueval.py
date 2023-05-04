@@ -74,6 +74,16 @@ class iouEval:
         iou = intersection / union
         iou_mean = (intersection[self.include] / union[self.include]).mean()
         return iou_mean, iou  # returns "iou mean", "iou per class" ALL CLASSES
+    
+    def getIoUMissingClass(self):
+        tp, fp, fn = self.getStats()
+        intersection = tp
+        union = tp + fp + fn + 1e-15
+        iou = intersection / union
+        iou_mean = (intersection[self.include] / union[self.include])
+        present_classes = (tp+fp+fn!=0)[self.include]
+        iou_mean = iou_mean[present_classes].mean()
+        return iou_mean, iou  # returns "iou mean", "iou per class" ALL CLASSES
 
     def getacc(self):
         tp, fp, fn = self.getStats()
