@@ -29,10 +29,10 @@ class BackBone(nn.Module):
         in_size: input size of the image
     """
 
-    def __init__(self, name, use_att = False, fuse_all = True, brach_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
+    def __init__(self, name, use_att = False, fuse_all = True, branch_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
         super().__init__()
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
-        assert brach_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
+        assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
         
         def get_smaller(in_size, scale):
             """
@@ -71,7 +71,7 @@ class BackBone(nn.Module):
 
             
         elif name == "mask2former":
-            weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(brach_type)
+            weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(branch_type)
             self.backbone = Mask2FormerModel.from_pretrained(weight).pixel_level_module
     
             if fuse_all:
@@ -125,7 +125,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name="mask2former", use_att=use_att, fuse_all=aux, only_enc=False, brach_type="semantic")
+        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, brach_type="semantic")
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
@@ -241,9 +241,9 @@ class Fusion_with_resnet(nn.Module):
 
         """LATE FUSION"""
         if self.fusion_scale == "main_late":
-            if self.fusion_type == "cat+conv":
+            if not self.use_att:
                 out = self.fusion(torch.cat([out, rgb_out[0]], dim=1))
-            elif self.fusion_type == "cross_attention":
+            else:
                 out = self.fusion(out, rgb_out[0])
                 #! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
                 if out.shape != rgb_out[0].shape:
