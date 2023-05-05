@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import sys
-sys.path.append('/home/son/project/praktikum/CENet-fusion')
+import os
+sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 from torchvision.models.segmentation import fcn_resnet50, deeplabv3_resnet50
 from ResNet import BasicBlock, BasicConv2d, conv1x1, conv3x3
 from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, PatchUnEmbed
@@ -24,7 +25,7 @@ class BackBone(nn.Module):
         name: name of the backbone
         use_att: whether to use attention
         fuse_all: whether to fuse all the layers in the backbone
-        brach_type: semantic, instance or panoptic
+        branch_type: semantic, instance or panoptic
         only_enc: whether to only use the encoder
         in_size: input size of the image
     """
@@ -117,7 +118,7 @@ class Fusion_with_resnet(nn.Module):
     fusion_scale: "all" or "main_late" or "main_early"
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all'):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='main_early'):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -125,7 +126,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, brach_type="semantic")
+        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, branch_type="semantic")
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
