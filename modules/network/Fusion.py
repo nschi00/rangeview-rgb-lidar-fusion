@@ -8,6 +8,7 @@ from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, P
 from third_party.Mask2Former.mask2former.modeling.backbone.swin import PatchEmbed 
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from torch.nn import functional as F
+from transformers import AutoImageProcessor, Mask2FormerModel
 
 """ This is a torch way of getting the intermediate layers  
  return_layers = {"layer4": "out"}
@@ -16,36 +17,115 @@ from torch.nn import functional as F
  backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
 """
 
+class BackBone(nn.Module):
+    """_summary_
+
+    Args:
+        name: name of the backbone
+        use_att: whether to use attention
+        fuse_all: whether to fuse all the layers in the backbone
+        brach_type: semantic, instance or panoptic
+        only_enc: whether to only use the encoder
+        in_size: input size of the image
+    """
+
+    def __init__(self, name, use_att = False, fuse_all = True, brach_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
+        super().__init__()
+        assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
+        assert brach_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
+        
+        def get_smaller(in_size, scale):
+            """
+            Returns a tuple of the smaller size given an input size and scale factor.
+            """
+            return (in_size[0]//scale, in_size[1]//scale)
+        
+        self.name = name
+        self.in_size = in_size
+        output_res = [1,2,4,8] #* Define output resolution 
+        if use_att and fuse_all:
+            output_res = [1, 1, 4, 4] #* only fuse with attention in 2 resolutions to save resources
+        if only_enc:
+            hidden_dim = [96 , 192, 384, 768]
+            self.layer_list = ["encoder_hidden_states"] * 4
+        else:
+            hidden_dim = [256] * 4
+            self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]  
+           
+        
+        if name == "resnet50":
+            hidden_dim = [2048] + [1024] * 3
+            self.layer_list = ["out"] + ["aux"] * 3
+            self.processor = None
+            self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
+            
+            if fuse_all:
+                self.upscale_layers = nn.ModuleList([
+                    Upscale_head(hidden_dim[0], 128, (8,16), get_smaller(in_size, output_res[0])),
+                    Upscale_head(hidden_dim[1], 128, (8,16), get_smaller(in_size, output_res[1])),
+                    Upscale_head(hidden_dim[2], 128, (8,16), get_smaller(in_size, output_res[2])),
+                    BasicConv2d(hidden_dim[3],128,1)
+                ])
+            else:
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, (8,16), in_size)])
+
+            
+        elif name == "mask2former":
+            weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(brach_type)
+            self.backbone = Mask2FormerModel.from_pretrained(weight).pixel_level_module
+    
+            if fuse_all:
+                self.upscale_layers = nn.ModuleList([
+                    Upscale_head(hidden_dim[0], 128, get_smaller(in_size, 4), get_smaller(in_size, output_res[0])),
+                    Upscale_head(hidden_dim[1], 128, get_smaller(in_size, 8), get_smaller(in_size, output_res[1])),
+                    Upscale_head(hidden_dim[2], 128, get_smaller(in_size, 16), get_smaller(in_size, output_res[2])),
+                    Upscale_head(hidden_dim[3], 128, get_smaller(in_size, 32), get_smaller(in_size, output_res[3]))
+                ])
+            else:
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, get_smaller(in_size, 4), in_size)])
+              
+        else:
+            raise NotImplementedError
+        
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+        
+
+    def forward(self, x):
+        with torch.no_grad():
+            x = self.backbone(x, output_hidden_states=True) if self.name != "resnet50" else self.backbone(x)
+        outputs = []
+        for i in range(len(self.layer_list)):
+            if type(x[self.layer_list[i]]) == tuple:
+                out = x[self.layer_list[i]][i]
+                outputs.append(out)
+            else:
+                out = x[self.layer_list[i]]
+                outputs.append(out)
+                outputs.reverse() if self.name != "resnet50" else outputs
+        
+        for j, layer in enumerate(self.upscale_layers):
+            outputs[j] = layer(outputs[j])
+
+        return outputs
+
 class Fusion_with_resnet(nn.Module):
     """
     All scale fusion with resnet50 backbone
     Basic fusion with torch.cat + conv1x1
-    fusion_type: "cat+conv" or "cross_attention"
+    use_att: use cross attention or not
     fusion_scale: "all" or "main_late" or "main_early"
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, fusion_type='cross_attention', fusion_scale='main_late'):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all'):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
-        self.fusion_type = fusion_type
+        self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        if fusion_type == "cross_attention":
-            assert fusion_scale == "main_late", "Cross attention currently only works with main late fusion"
-
-        """BACKBONE AND UPSAMPLING HEADS"""
-        #TODO: implement different backbones since deeplabv3 might need to be retrained since the backbone is trained on COCO dataset
-        #TODO: if it is mask2former, then it can be pixel decoder or encoder
-        self.backbone = deeplabv3_resnet50(weights='DEFAULT', aux_loss = aux).backbone
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-        self.upscale_main = Upscale_head(2048, 128, (8,16), (64,512))
-        if self.fusion_scale == 'all':
-            self.upscale_aux_1 = Upscale_head(1024, 128, (8,16), (32,256))
-            self.upscale_aux_2 = Upscale_head(1024, 128, (8,16), (16,128))
-            self.upscale_aux_3 = BasicConv2d(1024,128,1)
+        self.backbone = BackBone(name="mask2former", use_att=use_att, fuse_all=aux, only_enc=False, brach_type="semantic")
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
@@ -77,14 +157,11 @@ class Fusion_with_resnet(nn.Module):
             self.aux_head3 = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
-        if fusion_type == 'cat+conv':
+        if not use_att:
             self.fusion = BasicConv2d(256, 128, kernel_size=1, padding=0)
-        
-        elif fusion_type == 'cross_attention':
+        else:
             self.fusion = Cross_SW_Attention()
 
-        else:
-            raise NotImplementedError
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -117,9 +194,8 @@ class Fusion_with_resnet(nn.Module):
 
     def forward(self, x, rgb):
         #* get RGB features
-        with torch.no_grad():
-            rgb = self.backbone(rgb)
-        rgb_main = self.upscale_main(rgb['out'])
+        
+        rgb_out = self.backbone(rgb)
         
 
         #* get projection features
@@ -130,10 +206,13 @@ class Fusion_with_resnet(nn.Module):
 
         """FUSION MAIN SCALES"""
         if self.fusion_scale == "main_early":
-            if self.fusion_type == "cat+conv":
-                x = self.fusion(torch.cat([x, rgb_main], dim=1))
-                x_1 = self.fusion(torch.cat([x_1, rgb_main], dim=1))
-        #TODO: consider implement "main" early fusion for cross attention: testing is needed
+            if not self.use_att:
+                x = self.fusion(torch.cat([x, rgb_out[0]], dim=1))
+                x_1 = self.fusion(torch.cat([x_1, rgb_out[0]], dim=1))
+            else:
+                x = self.fusion(x, rgb_out[0])
+                x_1 = self.fusion(x_1, rgb_out[0])
+    
 
         x_2 = self.layer2(x_1)  # 1/2
         x_3 = self.layer3(x_2)  # 1/4
@@ -141,15 +220,12 @@ class Fusion_with_resnet(nn.Module):
 
         """FUSION ALL(AUX) SCALES"""
         if self.fusion_scale == "all":
-            rgb_aux_1 = self.upscale_aux_1(rgb['aux'])
-            rgb_aux_2 = self.upscale_aux_2(rgb['aux'])
-            rgb_aux_3 = self.upscale_aux_3(rgb['aux'])
-            if self.fusion_type == "cat+conv":
-                x = self.fusion(torch.cat([x, rgb_main], dim=1))
-                x_1 = self.fusion(torch.cat([x_1, rgb_main], dim=1))
-                x_2 = self.fusion(torch.cat([x_2, rgb_aux_1], dim=1))
-                x_3 = self.fusion(torch.cat([x_3, rgb_aux_2], dim=1))
-                x_4 = self.fusion(torch.cat([x_4, rgb_aux_3], dim=1))
+            if not self.use_att:
+                x = self.fusion(torch.cat([x, rgb_out[0]], dim=1))
+                x_1 = self.fusion(torch.cat([x_1, rgb_out[0]], dim=1))
+                x_2 = self.fusion(torch.cat([x_2, rgb_out[1]], dim=1))
+                x_3 = self.fusion(torch.cat([x_3, rgb_out[2]], dim=1))
+                x_4 = self.fusion(torch.cat([x_4, rgb_out[3]], dim=1))
 
         #TODO: consider implement "all" early fusion for cross attention: very F***ing expensive
 
@@ -166,12 +242,12 @@ class Fusion_with_resnet(nn.Module):
         """LATE FUSION"""
         if self.fusion_scale == "main_late":
             if self.fusion_type == "cat+conv":
-                out = self.fusion(torch.cat([out, rgb_main], dim=1))
+                out = self.fusion(torch.cat([out, rgb_out[0]], dim=1))
             elif self.fusion_type == "cross_attention":
-                out = self.fusion(out, rgb_main)
+                out = self.fusion(out, rgb_out[0])
                 #! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
-                if out.shape != rgb_main.shape:
-                    out = F.interpolate(out, size=rgb_main.shape[2:], mode='bilinear', align_corners=True)
+                if out.shape != rgb_out[0].shape:
+                    out = F.interpolate(out, size=rgb_out[0].shape[2:], mode='bilinear', align_corners=True)
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
@@ -348,8 +424,8 @@ if __name__ == "__main__":
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []
     for i in range(20):
-        input_3D = torch.randn(2, 5, 64, 512).cuda()
-        input_rgb = torch.randn(2, 3, 64, 512).cuda()
+        input_3D = torch.rand(2, 5, 64, 512).cuda()
+        input_rgb = torch.rand(2, 3, 64, 512).cuda()
         model.eval()
         with torch.no_grad():
           start_time = time.time()
