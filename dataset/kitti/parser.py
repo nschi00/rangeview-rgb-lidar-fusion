@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from common.laserscan import LaserScan, SemLaserScan
-from torchvision.transforms import ToTensor
+import torchvision.transforms as TF
 
 import torch
 import math
@@ -96,6 +96,7 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
+    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -167,8 +168,7 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index]
-    img_transform = ToTensor()
-    rgb_data = img_transform(Image.open(self.rgb_files[index]).resize((512,170)))
+    rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
 
     if self.gt:
       label_file = self.label_files[index]

@@ -27,7 +27,7 @@ def save_to_log(logdir, logfile, message):
     return
 
 
-def save_checkpoint(to_save, logdir, suffix=""):
+def save_checkpoint(to_save, logdir, suffix=".pth"):
     # Save the weights
     torch.save(to_save, logdir +
                "/SENet" + suffix)
@@ -113,8 +113,8 @@ class Trainer():
                     convert_relu_to_softplus(self.model, nn.SiLU())
             
             if self.ARCH["train"]["pipeline"] == "fusion":
-                from modules.network.ResNet import Fusion
-                self.model = Fusion(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
+                from modules.network.Fusion import Fusion_with_resnet
+                self.model = Fusion_with_resnet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
                 if self.ARCH["train"]["act"] == "Hardswish":
                     convert_relu_to_softplus(self.model, nn.Hardswish())
                 elif self.ARCH["train"]["act"] == "SiLU":
@@ -132,6 +132,7 @@ class Trainer():
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
+        print("Overfitting samples: ", self.ARCH["train"]["overfit"])
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
 

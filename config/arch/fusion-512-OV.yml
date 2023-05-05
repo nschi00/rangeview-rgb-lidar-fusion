@@ -5,7 +5,7 @@ train:
   pipeline: "fusion"       #  "res" "fid" "hard"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
-  aux_loss: False
+  aux_loss: True
   overfit: True
   lamda: 1.0
   scheduler: "consine"  # "consine" or "decay"
