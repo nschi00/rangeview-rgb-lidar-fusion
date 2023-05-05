@@ -133,7 +133,7 @@ class Fusion_with_resnet(nn.Module):
             if self.fusion_type == "cat+conv":
                 x = self.fusion(torch.cat([x, rgb_main], dim=1))
                 x_1 = self.fusion(torch.cat([x_1, rgb_main], dim=1))
-        #TODO: consider implement "main" early fusion for cross attention: testing are needed
+        #TODO: consider implement "main" early fusion for cross attention: testing is needed
 
         x_2 = self.layer2(x_1)  # 1/2
         x_3 = self.layer3(x_2)  # 1/4
@@ -266,12 +266,17 @@ class Cross_SW_Attention(nn.Module):
                 input_size[1] // patch_size[1],
             ]
 
-            self.absolute_pos_embed = nn.Parameter(
+            self.absolute_pos_embed_A = nn.Parameter(
                 torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1])
             )
-            trunc_normal_(self.absolute_pos_embed, std=0.02)
+            self.absolute_pos_embed_B = nn.Parameter(
+                torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1])
+            )
+            trunc_normal_(self.absolute_pos_embed_A, std=0.02)
+            trunc_normal_(self.absolute_pos_embed_B, std=0.02)
         elif self.pe_type == 'adaptive':
             pass
+        ##TODO: add adaptive PE
         else:
             raise NotImplementedError(f"Not support pe type {self.pe_type}.")
         
@@ -307,8 +312,8 @@ class Cross_SW_Attention(nn.Module):
         x_size = (x.shape[2], x.shape[3])
 
         #* Add position embedding
-        x = (x + self.absolute_pos_embed).flatten(2).transpose(1, 2)
-        y = (y + self.absolute_pos_embed).flatten(2).transpose(1, 2)
+        x = (x + self.absolute_pos_embed_A).flatten(2).transpose(1, 2)
+        y = (y + self.absolute_pos_embed_B).flatten(2).transpose(1, 2)
 
         x = self.pos_drop(x)
         y = self.pos_drop(y)
