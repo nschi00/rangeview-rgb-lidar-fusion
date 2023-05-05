@@ -167,7 +167,13 @@ class Trainer():
             self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
-
+        """
+        TODO: create different optimizers and schedulers for different part of the model
+        Example:
+        backbone can be retrained with a lower learning rate
+        main resnet model prefer cosine annealing with max lr = 0.01
+        swin fusion prefer adam with MULTISTEPLR (need to check document)
+        """
         if self.ARCH["train"]["scheduler"] == "consine":
             length = self.parser.get_train_size()
             dict = self.ARCH["train"]["consine"]

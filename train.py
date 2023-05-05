@@ -7,7 +7,8 @@ from shutil import copyfile
 import yaml
 import os
 from modules.trainer import Trainer
-
+import sys
+sys.path.append('/home/son/project/praktikum/CENet-fusion/modules/network')
 
 if __name__ == '__main__':
 
