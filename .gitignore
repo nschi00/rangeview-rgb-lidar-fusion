@@ -1,5 +1,6 @@
 *.png
 logs/*
+logs_base/*
 __pycache__/
 *.py[cod]
 *.pdf

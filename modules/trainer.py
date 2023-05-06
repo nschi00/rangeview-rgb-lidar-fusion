@@ -133,6 +133,7 @@ class Trainer():
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
+        print("Using auxilarry loss: ", self.ARCH["train"]["aux_loss"])
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
 

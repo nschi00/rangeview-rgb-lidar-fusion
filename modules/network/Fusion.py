@@ -30,11 +30,13 @@ class BackBone(nn.Module):
         in_size: input size of the image
     """
 
-    def __init__(self, name, use_att = False, fuse_all = True, branch_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
+    def __init__(self, name, use_att = False, fuse_all = "all", branch_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
         super().__init__()
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
         assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
-        
+        assert fuse_all in ["all", "main_early", "main_late"]
+
+        fuse_all = True if fuse_all == "all" else False
         def get_smaller(in_size, scale):
             """
             Returns a tuple of the smaller size given an input size and scale factor.
@@ -118,7 +120,7 @@ class Fusion_with_resnet(nn.Module):
     fusion_scale: "all" or "main_late" or "main_early"
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='main_early'):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all'):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -126,7 +128,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, branch_type="semantic")
+        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=fusion_scale, only_enc=False, branch_type="semantic")
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
