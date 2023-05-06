@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import sys
-sys.path.append('/home/son/project/praktikum/CENet-fusion')
+import os
+sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 from torchvision.models.segmentation import fcn_resnet50, deeplabv3_resnet50
 from ResNet import BasicBlock, BasicConv2d, conv1x1, conv3x3
 from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, PatchUnEmbed
@@ -24,7 +25,7 @@ class BackBone(nn.Module):
         name: name of the backbone
         use_att: whether to use attention
         fuse_all: whether to fuse all the layers in the backbone
-        brach_type: semantic, instance or panoptic
+        branch_type: semantic, instance or panoptic
         only_enc: whether to only use the encoder
         in_size: input size of the image
     """
