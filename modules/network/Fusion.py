@@ -117,7 +117,7 @@ class Fusion_with_resnet(nn.Module):
     fusion_scale: "all" or "main_late" or "main_early"
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all'):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='main_early'):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -125,7 +125,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, brach_type="semantic")
+        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=aux, only_enc=False, branch_type="semantic")
 
         """BASEMODEL"""
         self._norm_layer = norm_layer

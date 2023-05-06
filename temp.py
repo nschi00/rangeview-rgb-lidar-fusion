@@ -1,19 +1,20 @@
 import requests
 import torch
 from PIL import Image
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
+from transformers import AutoImageProcessor, Mask2FormerModel
 
 
 # load Mask2Former fine-tuned on Cityscapes semantic segmentation
 processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
-model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
+model = Mask2FormerModel.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
+model = model.pixel_level_module
 
 url = "http://images.cocodataset.org/val2017/000000039769.jpg"
 image = Image.open(requests.get(url, stream=True).raw)
 inputs = processor(images=image, return_tensors="pt")
-
+a = inputs["pixel_values"]
 with torch.no_grad():
-    outputs = model(**inputs, output_hidden_states=True)
+    outputs = model(a, output_hidden_states=True)
 
 # model predicts class_queries_logits of shape `(batch_size, num_queries)`
 # and masks_queries_logits of shape `(batch_size, num_queries, height, width)`
