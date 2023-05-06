@@ -5,7 +5,7 @@ train:
   pipeline: "fusion"       #  "res" "fid" "hard"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
-  aux_loss: True
+  aux_loss: False
   overfit: True
   lamda: 1.0
   scheduler: "consine"  # "consine" or "decay"
@@ -39,10 +39,10 @@ train:
 ################################################################################
 fusion:                     # only relevant if pipeline == "fusion"
   use_att: False            # whether to use cross-encoder or convolution for fusion
-  fuse_all: "all"    # "all", "main_early" or "main_late"
-  branch_type: "semantic"   # "semantic", "instance" or "panoptic"
-  name_backbone: "mask2former" # "resnet50" or "mask2former"
-  only_enc: True           # whether to only use the encoder of the rgb backbone
+  fuse_all: "main_early"    # "all", "main_early" or "main_late"
+  branch_type: "panoptic"   # "semantic", "instance" or "panoptic"
+  name_backbone: "resnet50" # "resnet50" or "mask2former"
+  only_enc: False           # whether to only use the encoder of the rgb backbone
 
 ################################################################################
 # postproc parameters
