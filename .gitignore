@@ -9,5 +9,4 @@ __pycache__/
 !logs/overfit_base
 .vscode/launch.json
 third_party/Mask2Former
-.gitignore
 third_party/SwinFusion
