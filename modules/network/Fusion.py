@@ -118,9 +118,13 @@ class Fusion_with_resnet(nn.Module):
     Basic fusion with torch.cat + conv1x1
     use_att: use cross attention or not
     fusion_scale: "all" or "main_late" or "main_early"
+    name_backbone: backbone for RGB, only "resnet50" at the moment possible
+    branch_type: semantic, instance or panoptic
+    only_enc: whether to only use the encoder of the backbone
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all'):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all', name_backbone="resnet50", branch_type="semantic",
+                 only_enc=False):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -128,7 +132,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name="resnet50", use_att=use_att, fuse_all=fusion_scale, only_enc=False, branch_type="semantic")
+        self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=fusion_scale, only_enc=only_enc, branch_type=branch_type)
 
         """BASEMODEL"""
         self._norm_layer = norm_layer

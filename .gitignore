@@ -7,3 +7,7 @@ __pycache__/
 *.pth
 *.pt
 !logs/overfit_base
+.vscode/launch.json
+third_party/Mask2Former
+.gitignore
+third_party/SwinFusion

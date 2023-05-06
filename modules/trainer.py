@@ -114,7 +114,9 @@ class Trainer():
             
             if self.ARCH["train"]["pipeline"] == "fusion":
                 from modules.network.Fusion import Fusion_with_resnet
-                self.model = Fusion_with_resnet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
+                self.model = Fusion_with_resnet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"], use_att=self.ARCH["fusion"]["use_att"],
+                                                fusion_scale=self.ARCH["fusion"]["fuse_all"], name_backbone=self.ARCH["fusion"]["name_backbone"],
+                                                branch_type=self.ARCH["fusion"]["branch_type"], only_enc=self.ARCH["fusion"]["only_enc"])
                 if self.ARCH["train"]["act"] == "Hardswish":
                     convert_relu_to_softplus(self.model, nn.Hardswish())
                 elif self.ARCH["train"]["act"] == "SiLU":
