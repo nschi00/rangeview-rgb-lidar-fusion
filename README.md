@@ -1,7 +1,8 @@
 # CENet: Toward Concise and Efficient LiDAR Semantic Segmentation for Autonomous Driving [![arXiv](https://img.shields.io/badge/arXiv-2207.12691-b31b1b?logo=arXiv&logoColor=green)](https://arxiv.org/abs/2207.12691)
 
-git clone --recurse-submodules -j8 https://github.com/nschi00/CENet-fusion.git
-cd bar
+'git clone --recurse-submodules -j8 https://github.com/nschi00/CENet-fusion.git'
+'git clone --recurse-submodules -j8 git@github.com:nschi00/CENet-fusion.git'
+
 
 Code for our paper:
 > **CENet: Toward Concise and Efficient LiDAR Semantic Segmentation for Autonomous Driving**
