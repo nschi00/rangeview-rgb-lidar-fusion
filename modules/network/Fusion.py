@@ -172,8 +172,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         
         self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=self.ALL, stage=stage, branch_type=branch_type)
-        print("Backbone {} loaded, {} branch".format(name_backbone, branch_type))
-        print("Fusion scale: {}".format(fusion_scale))
+
         """BASEMODEL"""
         self._norm_layer = norm_layer
         self.if_BN = if_BN
