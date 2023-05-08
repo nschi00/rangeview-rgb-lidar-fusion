@@ -9,7 +9,7 @@ from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, P
 from third_party.Mask2Former.mask2former.modeling.backbone.swin import PatchEmbed 
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from torch.nn import functional as F
-from transformers import AutoImageProcessor, Mask2FormerModel, Mask2FormerForUniversalSegmentation
+from transformers import Mask2FormerModel
 
 """ This is a torch way of getting the intermediate layers  
  return_layers = {"layer4": "out"}
