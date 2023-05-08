@@ -16,7 +16,7 @@ train:
     first_cycle: 50
     cycle: 1
     wup_epochs: 20
-    gamma: 0.93
+    gamma: 0.95
   decay:
     lr: 0.01
     wup_epochs: 1        # warmup during first XX epochs (can be float)
@@ -37,12 +37,12 @@ train:
 ################################################################################
 # fusion parameters
 ################################################################################
-fusion:                     # only relevant if pipeline == "fusion"
-  use_att: False            # whether to use cross-encoder or convolution for fusion
-  fuse_all: "main_early"    # "all", "main_early" or "main_late"
-  branch_type: "panoptic"   # "semantic", "instance" or "panoptic"
-  name_backbone: "resnet50" # "resnet50" or "mask2former"
-  only_enc: False           # whether to only use the encoder of the rgb backbone
+fusion:                         # only relevant if pipeline == "fusion"
+  use_att: False                # whether to use cross-encoder or convolution for fusion
+  fuse_all: "all"               # "all", "main_early" or "main_late"
+  branch_type: "semantic"       # "semantic", "instance" or "panoptic"
+  name_backbone: "mask2former"  # "resnet50" or "mask2former"
+  stage: "combination"          #"pixel_dec", "transformer_dec", "combination"
 
 ################################################################################
 # postproc parameters

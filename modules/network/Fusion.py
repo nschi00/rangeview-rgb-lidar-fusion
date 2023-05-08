@@ -9,7 +9,7 @@ from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, P
 from third_party.Mask2Former.mask2former.modeling.backbone.swin import PatchEmbed 
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from torch.nn import functional as F
-from transformers import AutoImageProcessor, Mask2FormerModel
+from transformers import AutoImageProcessor, Mask2FormerModel, Mask2FormerForUniversalSegmentation
 
 """ This is a torch way of getting the intermediate layers  
  return_layers = {"layer4": "out"}
@@ -26,15 +26,16 @@ class BackBone(nn.Module):
         use_att: whether to use attention
         fuse_all: whether to fuse all the layers in the backbone
         branch_type: semantic, instance or panoptic
-        only_enc: whether to only use the encoder
+        stage: whether to only use the encoder, transformer decoder or combined pixe/transformer output
         in_size: input size of the image
     """
 
-    def __init__(self, name, use_att = False, fuse_all = "all", branch_type = "semantic", only_enc = False, in_size = (64,512)) -> None:
+    def __init__(self, name, use_att = False, fuse_all = "all", branch_type = "semantic", stage = "combination", in_size = (64,512)) -> None:
         super().__init__()
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
         assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
         assert fuse_all in ["all", "main_early", "main_late"]
+        assert stage in ["pixel_dec", "transformer_dec", "combination"]
 
         fuse_all = True if fuse_all == "all" else False
         def get_smaller(in_size, scale):
@@ -45,16 +46,24 @@ class BackBone(nn.Module):
         
         self.name = name
         self.in_size = in_size
+        self.branch_type = branch_type
+        self.stage = stage
+        self.fuse_all = fuse_all
         output_res = [1,2,4,8] #* Define output resolution 
         if use_att and fuse_all:
             output_res = [1, 1, 4, 4] #* only fuse with attention in 2 resolutions to save resources
-        if only_enc:
-            hidden_dim = [96 , 192, 384, 768]
+        if stage == "pixel_dec":
+            hidden_dim = [96, 192, 384, 768]
             self.layer_list = ["encoder_hidden_states"] * 4
-        else:
+        elif stage == "transformer_dec":
             hidden_dim = [256] * 4
-            self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]  
-           
+            self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]
+        else:  # stage == "combination"
+            if fuse_all:
+                hidden_dim = [128] * 4
+            else:
+                hidden_dim = [128] * 1
+            self.layer_list = []  ## not necessary for combination
         
         if name == "resnet50":
             hidden_dim = [2048] + [1024] * 3
@@ -75,7 +84,11 @@ class BackBone(nn.Module):
             
         elif name == "mask2former":
             weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(branch_type)
-            self.backbone = Mask2FormerModel.from_pretrained(weight).pixel_level_module
+            if stage != "combination":
+                self.backbone = Mask2FormerModel.from_pretrained(weight).pixel_level_module
+            else:
+                self.backbone = Mask2FormerModel.from_pretrained(weight)
+                self.class_predictor = nn.Linear(256, 128)
     
             if fuse_all:
                 self.upscale_layers = nn.ModuleList([
@@ -97,16 +110,36 @@ class BackBone(nn.Module):
     def forward(self, x):
         with torch.no_grad():
             x = self.backbone(x, output_hidden_states=True) if self.name != "resnet50" else self.backbone(x)
+
         outputs = []
-        for i in range(len(self.layer_list)):
-            if type(x[self.layer_list[i]]) == tuple:
-                out = x[self.layer_list[i]][i]
-                outputs.append(out)
+        if self.name == "mask2former" and self.stage == "combination":
+            class_queries_logits = ()
+            for decoder_output in x.transformer_decoder_intermediate_states:
+                class_prediction = self.class_predictor(decoder_output.transpose(0, 1))
+                class_queries_logits += (class_prediction,)
+
+            if self.fuse_all:
+                class_queries_logits = [class_queries_logits[-1], class_queries_logits[-3], class_queries_logits[-5], class_queries_logits[-7]]
+                masks_queries_logits = [x.masks_queries_logits[-1], x.masks_queries_logits[-3], x.masks_queries_logits[-5], x.masks_queries_logits[-7]]
             else:
-                out = x[self.layer_list[i]]
+                class_queries_logits = [class_queries_logits[-1]]
+                masks_queries_logits = [x.masks_queries_logits[-1]]  # [batch_size, num_queries, height, width]
+            for i in range(len(class_queries_logits)):
+                masks_classes = class_queries_logits[i]
+                masks_probs = masks_queries_logits[i]  # [batch_size, num_queries, height, width]
+                # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
+                out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
                 outputs.append(out)
-                outputs.reverse() if self.name != "resnet50" else outputs
-        
+        else:
+            for i in range(len(self.layer_list)):
+                if type(x[self.layer_list[i]]) == tuple:
+                    out = x[self.layer_list[i]][i]
+                    outputs.append(out)
+                else:
+                    out = x[self.layer_list[i]]
+                    outputs.append(out)
+                    outputs.reverse() if self.name != "resnet50" else outputs
+            
         for j, layer in enumerate(self.upscale_layers):
             outputs[j] = layer(outputs[j])
 
@@ -118,13 +151,13 @@ class Fusion_with_resnet(nn.Module):
     Basic fusion with torch.cat + conv1x1
     use_att: use cross attention or not
     fusion_scale: "all" or "main_late" or "main_early"
-    name_backbone: backbone for RGB, only "resnet50" at the moment possible
+    name_backbone: backbone for RGB
     branch_type: semantic, instance or panoptic
-    only_enc: whether to only use the encoder of the backbone
+    stage: whether to only use the encoder, transformer decoder or combined pixe/transformer output
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all', name_backbone="resnet50", branch_type="semantic",
-                 only_enc=False):
+                 stage="combination"):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -132,7 +165,7 @@ class Fusion_with_resnet(nn.Module):
         self.use_att = use_att
         self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=fusion_scale, only_enc=only_enc, branch_type=branch_type)
+        self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=fusion_scale, stage=stage, branch_type=branch_type)
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
