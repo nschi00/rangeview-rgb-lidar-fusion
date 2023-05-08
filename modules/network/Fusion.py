@@ -35,7 +35,7 @@ class BackBone(nn.Module):
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
         assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
         assert fuse_all in ["all", "main_early", "main_late"]
-        assert stage in ["pixel_dec", "transformer_dec", "combination"]
+        assert stage in ["enc", "transformer_dec", "combination"]
 
         fuse_all = True if fuse_all == "all" else False
         def get_smaller(in_size, scale):
@@ -52,7 +52,7 @@ class BackBone(nn.Module):
         output_res = [1,2,4,8] #* Define output resolution 
         if use_att and fuse_all:
             output_res = [1, 1, 4, 4] #* only fuse with attention in 2 resolutions to save resources
-        if stage == "pixel_dec":
+        if stage == "enc":
             hidden_dim = [96, 192, 384, 768]
             self.layer_list = ["encoder_hidden_states"] * 4
         elif stage == "transformer_dec":
