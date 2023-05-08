@@ -35,7 +35,9 @@ class BackBone(nn.Module):
         super().__init__()
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
         assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
+        assert fuse_all in ["all", "main_early", "main_late"]
 
+        fuse_all = True if fuse_all == "all" else False
         def get_smaller(in_size, scale):
             """
             Returns a tuple of the smaller size given an input size and scale factor.
@@ -116,29 +118,22 @@ class Fusion_with_resnet(nn.Module):
     All scale fusion with resnet50 backbone
     Basic fusion with torch.cat + conv1x1
     use_att: use cross attention or not
-    fusion_scale: "all_early" or "all_late" or "main_late" or "main_early"
+    fusion_scale: "all" or "main_late" or "main_early"
     name_backbone: backbone for RGB, only "resnet50" at the moment possible
     branch_type: semantic, instance or panoptic
     only_enc: whether to only use the encoder of the backbone
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all_early', name_backbone="resnet50", branch_type="semantic",
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all', name_backbone="resnet50", branch_type="semantic",
                  only_enc=False):
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
-        assert fusion_scale in ["all_early", "all_late", "main_late", "main_early"]
-        # if fusion_scale == "main_late":
-        #     assert aux == False
-        #* whether to fuse all scales or only main scales
-        self.ALL = "all" in fusion_scale
-        #* whether to fuse early or late
-        self.EARLY = "early" in fusion_scale
-
         self.use_att = use_att
+        self.fusion_scale = fusion_scale
 
-        self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=self.ALL, only_enc=only_enc, branch_type=branch_type)
+        self.backbone = BackBone(name=name_backbone, use_att=use_att, fuse_all=fusion_scale, only_enc=only_enc, branch_type=branch_type)
         print("Backbone {} loaded, {} branch".format(name_backbone, branch_type))
         print("Fusion scale: {}".format(fusion_scale))
         """BASEMODEL"""
@@ -150,26 +145,25 @@ class Fusion_with_resnet(nn.Module):
         self.groups = groups
         self.base_width = width_per_group
 
-        self.initial_conv = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
-                                           BasicConv2d(64, 128, kernel_size=3, padding=1), 
-                                           BasicConv2d(128, 128, kernel_size=3, padding=1))
+        self.conv1 = BasicConv2d(5, 64, kernel_size=3, padding=1)
+        self.conv2 = BasicConv2d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = BasicConv2d(128, 128, kernel_size=3, padding=1)
 
         self.inplanes = 128
 
-        self.unet_layers = nn.ModuleList()
-        for i,j in enumerate([1,2,2,2]):
-            self.unet_layers.append(self._make_layer(block, 128, layers[i],stride=j))
+        self.layer1 = self._make_layer(block, 128, layers[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 128, layers[2], stride=2)
+        self.layer4 = self._make_layer(block, 128, layers[3], stride=2)
 
-        self.end_conv = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
-                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
-        
+        self.conv_1 = BasicConv2d(640, 256, kernel_size=3, padding=1)
+        self.conv_2 = BasicConv2d(256, 128, kernel_size=3, padding=1)
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
         if self.aux:
-            self.aux_heads = nn.ModuleDict()
-            for i in range(2,5):
-                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
-
+            self.aux_head1 = nn.Conv2d(128, nclasses, 1)
+            self.aux_head2 = nn.Conv2d(128, nclasses, 1)
+            self.aux_head3 = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
         if not use_att:
@@ -209,60 +203,79 @@ class Fusion_with_resnet(nn.Module):
 
     def forward(self, x, rgb):
         #* get RGB features
-        proj_size = x.size()[2:]
+        
         rgb_out = self.backbone(rgb)
+        
 
         #* get projection features
-        x = self.initial_conv(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x_1 = self.layer1(x)  # 1
+
         """FUSION MAIN SCALES"""
-        x_features = {'0':x}
-        del x
+        if self.fusion_scale == "main_early":
+            if not self.use_att:
+                x = self.fusion(torch.cat([x, rgb_out[0]], dim=1))
+                x_1 = self.fusion(torch.cat([x_1, rgb_out[0]], dim=1))
+            else:
+                x = self.fusion(x, rgb_out[0])
+                x_1 = self.fusion(x_1, rgb_out[0])
+    
 
-        for i in range(0,4):
-            x_features[str(i+1)] = self.unet_layers[i](x_features[str(i)])
-            if self.EARLY and i==0:
-                if self.use_att:
-                    x_features[str(i+1)] = self.fusion(x_features[str(i+1)], rgb_out[i])
-                else:
-                    x_features[str(i+1)] = self.fusion(torch.cat([x_features[str(i+1)], rgb_out[i]], dim=1))
-                continue
+        x_2 = self.layer2(x_1)  # 1/2
+        x_3 = self.layer3(x_2)  # 1/4
+        x_4 = self.layer4(x_3)  # 1/8
 
-            if self.ALL:
-                if self.use_att:
-                    x_features[str(i+1)] = self.fusion(x_features[str(i+1)], rgb_out[i])
-                else:
-                    x_features[str(i+1)] = self.fusion(torch.cat([x_features[str(i+1)], rgb_out[i]], dim=1))
+        """FUSION ALL(AUX) SCALES"""
+        if self.fusion_scale == "all":
+            if not self.use_att:
+                x = self.fusion(torch.cat([x, rgb_out[0]], dim=1))
+                x_1 = self.fusion(torch.cat([x_1, rgb_out[0]], dim=1))
+                x_2 = self.fusion(torch.cat([x_2, rgb_out[1]], dim=1))
+                x_3 = self.fusion(torch.cat([x_3, rgb_out[2]], dim=1))
+                x_4 = self.fusion(torch.cat([x_4, rgb_out[3]], dim=1))
 
-            
         #TODO: consider implement "all" early fusion for cross attention: very F***ing expensive
-        
-        for i in range(2,5):
-            x_features[str(i)] = F.interpolate(x_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
-            
-        x_features = list(x_features.values())
-        out = torch.cat(x_features, dim=1)
-        out = self.end_conv(out)
+
+        res_2 = F.interpolate(x_2, size=x.size()[2:], mode='bilinear', align_corners=True)
+        res_3 = F.interpolate(x_3, size=x.size()[2:], mode='bilinear', align_corners=True)
+        res_4 = F.interpolate(x_4, size=x.size()[2:], mode='bilinear', align_corners=True)
+
+        res = [x, x_1, res_2, res_3, res_4]
+
+        out = torch.cat(res, dim=1)
+        out = self.conv_1(out)
+        out = self.conv_2(out)
 
         """LATE FUSION"""
-        if not self.EARLY:
-            if self.use_att:
+        if self.fusion_scale == "main_late":
+            if not self.use_att:
+                out = self.fusion(torch.cat([out, rgb_out[0]], dim=1))
+            else:
                 out = self.fusion(out, rgb_out[0])
                 #! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
                 if out.shape != rgb_out[0].shape:
                     out = F.interpolate(out, size=rgb_out[0].shape[2:], mode='bilinear', align_corners=True)
-            else:
-                out = self.fusion(torch.cat([out, rgb_out[0]], dim=1))
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 
         if self.aux:
-            out = [out]
-            for i in range(2,5):
-                out.append(self.aux_heads["layer{}".format(i)](x_features[i]))
-                out[-1] = F.softmax(out[-1], dim=1)
+            res_2 = self.aux_head1(res_2)
+            res_2 = F.softmax(res_2, dim=1)
 
-        return out
+            res_3 = self.aux_head2(res_3)
+            res_3 = F.softmax(res_3, dim=1)
+
+            res_4 = self.aux_head3(res_4)
+            res_4 = F.softmax(res_4, dim=1)
+        if self.aux:
+            return [out, res_2, res_3, res_4]
+        else:
+            return out
+
+
 
 class Upscale_head(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, size_in: tuple, size_out: tuple) -> None:
@@ -368,6 +381,7 @@ class Cross_SW_Attention(nn.Module):
                                          norm_layer=norm_layer)
         
        
+        
         self.norm_A = norm_layer(self.embed_dim)
         if fusion_type == 'double_fuse':
             self.conv_fusion = BasicBlock(256,128,1)
@@ -375,6 +389,8 @@ class Cross_SW_Attention(nn.Module):
 
     
     def forward(self,x,y):
+        
+
         #* Divide image into patches
         x = self.patch_embed(x)
         y = self.patch_embed(y)
@@ -407,12 +423,12 @@ class Cross_SW_Attention(nn.Module):
         
         return x
         
+    
 
 if __name__ == "__main__":
     import time
     model = Fusion_with_resnet(20).cuda()
     print(model)
-
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []
