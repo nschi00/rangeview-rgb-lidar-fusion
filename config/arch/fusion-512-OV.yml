@@ -40,7 +40,7 @@ train:
 
 fusion:                         # only relevant if pipeline == "fusion"
   use_att: False                # whether to use cross-encoder or convolution for fusion
-  fuse_all: "all"               # "all", "main_early" or "main_late"
+  fuse_all: "all_early"         # "all_early", "all_late", "main_early" or "main_late"
   branch_type: "semantic"       # "semantic", "instance" or "panoptic"
   name_backbone: "mask2former"  # "resnet50" or "mask2former"
   stage: "combination"          # "enc", "transformer_dec", "combination"
