@@ -37,6 +37,7 @@ train:
 ################################################################################
 # fusion parameters
 ################################################################################
+
 fusion:                         # only relevant if pipeline == "fusion"
   use_att: False                # whether to use cross-encoder or convolution for fusion
   fuse_all: "all"               # "all", "main_early" or "main_late"
