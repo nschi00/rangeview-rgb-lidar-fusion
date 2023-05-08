@@ -1,6 +1,6 @@
 import sys
 sys.path.append('/home/son/project/pham_wrapper/CENet')
-print(sys.path)
+
 import torch.nn as nn
 import torch
 from torch.nn import functional as F

@@ -135,9 +135,12 @@ class Trainer():
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-        print("{}_conv: {}_{}_aux: {}". format(self.ARCH["train"]["name_backbone"], not self.ARCH["train"]["use_att"], self.ARCH["train"]["fuse_all"], self.ARCH["train"]["aux_loss"]))
-        if self.ARCH["train"]["name_backbone"] == "mask2former":
-            print("Branch: {}, Stage: {}".format(self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
+        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"], 
+                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv", 
+                                    self.ARCH["fusion"]["fuse_all"], 
+                                    "" if self.ARCH["train"]["aux_loss"] else "noaux"))
+        if self.ARCH["fusion"]["name_backbone"] == "mask2former":
+            print("{}_{}".format(self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
 
         print("Please verify your settings before continue.")
         time.sleep(7)
