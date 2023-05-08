@@ -26,7 +26,7 @@ class BackBone(nn.Module):
         use_att: whether to use attention
         fuse_all: whether to fuse all the layers in the backbone
         branch_type: semantic, instance or panoptic
-        stage: whether to only use the encoder, transformer decoder or combined pixe/transformer output
+        stage: whether to only use the encoder, transformer decoder or combined pixel/transformer decoder output
         in_size: input size of the image
     """
 
@@ -153,7 +153,7 @@ class Fusion_with_resnet(nn.Module):
     fusion_scale: "all" or "main_late" or "main_early"
     name_backbone: backbone for RGB
     branch_type: semantic, instance or panoptic
-    stage: whether to only use the encoder, transformer decoder or combined pixe/transformer output
+    stage: whether to only use the encoder, transformer decoder or combined pixel/transformer decoder output
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all', name_backbone="resnet50", branch_type="semantic",
