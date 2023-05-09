@@ -12,6 +12,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from torch.nn import functional as F
 from transformers import Mask2FormerModel
 
+
 """ This is a torch way of getting the intermediate layers  
  return_layers = {"layer4": "out"}
  if aux:
@@ -27,7 +28,7 @@ class BackBone(nn.Module):
         use_att: whether to use attention
         fuse_all: whether to fuse all the layers in the backbone
         branch_type: semantic, instance or panoptic
-        stage: whether to only use the encoder, transformer decoder or combined pixel/transformer decoder output
+        stage: whether to only use the encoder, pixel_decoder or combined pixel/transformer decoder output
         in_size: input size of the image
     """
 
@@ -35,7 +36,7 @@ class BackBone(nn.Module):
         super().__init__()
         assert name in ["resnet50", "mask2former"], "Backbone name must be either resnet50 or mask2former" 
         assert branch_type in ["semantic", "instance", "panoptic"], "Branch type must be either semantic, instance or panoptic"
-        assert stage in ["enc", "transformer_dec", "combination"]
+        assert stage in ["enc", "pixel_decoder", "combination"]
 
         def get_smaller(in_size, scale):
             """
@@ -54,14 +55,11 @@ class BackBone(nn.Module):
         if stage == "enc":
             hidden_dim = [96, 192, 384, 768]
             self.layer_list = ["encoder_hidden_states"] * 4
-        elif stage == "transformer_dec":
+        elif stage == "pixel_decoder":
             hidden_dim = [256] * 4
             self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]
-        else:  # stage == "combination"
-            if fuse_all:
-                hidden_dim = [128] * 4
-            else:
-                hidden_dim = [128] * 1
+        else:  #* stage == "combination"
+            hidden_dim = [128] * 4
             self.layer_list = []  ## not necessary for combination
         
         if name == "resnet50":
@@ -71,12 +69,8 @@ class BackBone(nn.Module):
             self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
             
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([
-                    Upscale_head(hidden_dim[0], 128, (8,16), get_smaller(in_size, output_res[0])),
-                    Upscale_head(hidden_dim[1], 128, (8,16), get_smaller(in_size, output_res[1])),
-                    Upscale_head(hidden_dim[2], 128, (8,16), get_smaller(in_size, output_res[2])),
-                    BasicConv2d(hidden_dim[3],128,1)
-                ])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i], 128, (8,16), get_smaller(in_size, output_res[i])) for i in range(3)])
+                self.upscale_layers.append(BasicConv2d(hidden_dim[3],128,1))
             else:
                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, (8,16), in_size)])
 
@@ -90,12 +84,7 @@ class BackBone(nn.Module):
                 self.class_predictor = nn.Linear(256, 128)
     
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([
-                    Upscale_head(hidden_dim[0], 128, get_smaller(in_size, 4), get_smaller(in_size, output_res[0])),
-                    Upscale_head(hidden_dim[1], 128, get_smaller(in_size, 8), get_smaller(in_size, output_res[1])),
-                    Upscale_head(hidden_dim[2], 128, get_smaller(in_size, 16), get_smaller(in_size, output_res[2])),
-                    Upscale_head(hidden_dim[3], 128, get_smaller(in_size, 32), get_smaller(in_size, output_res[3]))
-                ])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i], 128, get_smaller(in_size, 4), get_smaller(in_size, output_res[i])) for i in range(4)])
             else:
                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, get_smaller(in_size, 4), in_size)])
               
@@ -112,17 +101,24 @@ class BackBone(nn.Module):
 
         outputs = []
         if self.name == "mask2former" and self.stage == "combination":
-            class_queries_logits = ()
-            for decoder_output in x.transformer_decoder_intermediate_states:
-                class_prediction = self.class_predictor(decoder_output.transpose(0, 1))
-                class_queries_logits += (class_prediction,)
+            class_queries_logits = self.class_predictor(torch.stack(x.transformer_decoder_intermediate_states, dim=0).transpose(1, 2))
+            masks_queries_logits = x.masks_queries_logits
+            del x
+            #TODO: delete commended code after everything is working
+            # class_queries_logits = ()
+            # for decoder_output in x.transformer_decoder_intermediate_states:
+            #     class_prediction = self.class_predictor(decoder_output.transpose(0, 1))
+            #     class_queries_logits += (class_prediction,)
 
+            # print(class_queries_logits[-1].shape)
+            # print(class_prediction_1[-1].shape)
+            #a = [-i for i in range(1, 8, 2)]
             if self.fuse_all:
-                class_queries_logits = [class_queries_logits[-1], class_queries_logits[-3], class_queries_logits[-5], class_queries_logits[-7]]
-                masks_queries_logits = [x.masks_queries_logits[-1], x.masks_queries_logits[-3], x.masks_queries_logits[-5], x.masks_queries_logits[-7]]
+                class_queries_logits = [class_queries_logits[-i] for i in range(1, 8, 2)]
+                masks_queries_logits = [masks_queries_logits[-i] for i in range(1, 8, 2)]
             else:
                 class_queries_logits = [class_queries_logits[-1]]
-                masks_queries_logits = [x.masks_queries_logits[-1]]  # [batch_size, num_queries, height, width]
+                masks_queries_logits = [masks_queries_logits[-1]]  # [batch_size, num_queries, height, width]
             for i in range(len(class_queries_logits)):
                 masks_classes = class_queries_logits[i]
                 masks_probs = masks_queries_logits[i]  # [batch_size, num_queries, height, width]
@@ -152,11 +148,11 @@ class Fusion_with_resnet(nn.Module):
     fusion_scale: "all_early" or "all_late" or "main_late" or "main_early"
     name_backbone: backbone for RGB, only "resnet50" at the moment possible
     branch_type: semantic, instance or panoptic
-    stage: whether to only use the encoder, transformer decoder or combined pixel/transformer decoder output
+    stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all_early', name_backbone="resnet50", branch_type="semantic",
-                 stage="combination"):
+                 norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all_early', name_backbone="mask2former", branch_type="semantic",
+                 stage="enc"):
                  
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:

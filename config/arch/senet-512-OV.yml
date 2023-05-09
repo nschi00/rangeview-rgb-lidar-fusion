@@ -42,7 +42,7 @@ fusion:                         # only relevant if pipeline == "fusion"
   fuse_all: "main_early"        # "all", "main_early" or "main_late"
   branch_type: "panoptic"       # "semantic", "instance" or "panoptic"
   name_backbone: "resnet50"     # "resnet50" or "mask2former"
-  stage: "combination"          # "enc", "transformer_dec", "combination"
+  stage: "combination"          # "enc", "pixel_decoder", "combination"
 
 ################################################################################
 # postproc parameters
