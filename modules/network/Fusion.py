@@ -113,13 +113,11 @@ class BackBone(nn.Module):
             # print(class_queries_logits[-1].shape)
             # print(class_prediction_1[-1].shape)
             #a = [-i for i in range(1, 8, 2)]
-            if self.fuse_all:
-                class_queries_logits = [class_queries_logits[-i] for i in range(1, 8, 2)]
-                masks_queries_logits = [masks_queries_logits[-i] for i in range(1, 8, 2)]
-            else:
-                class_queries_logits = [class_queries_logits[-1]]
-                masks_queries_logits = [masks_queries_logits[-1]]  # [batch_size, num_queries, height, width]
-            for i in range(len(class_queries_logits)):
+            
+            class_queries_logits = [class_queries_logits[-i] for i in range(1, 8, 2)] # [batch_size, num_queries, height, width]
+            masks_queries_logits = [masks_queries_logits[-i] for i in range(1, 8, 2)]
+              
+            for i in range(len(class_queries_logits) if self.fuse_all else 1):
                 masks_classes = class_queries_logits[i]
                 masks_probs = masks_queries_logits[i]  # [batch_size, num_queries, height, width]
                 # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
@@ -152,7 +150,7 @@ class Fusion_with_resnet(nn.Module):
     """
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all_early', name_backbone="mask2former", branch_type="semantic",
-                 stage="enc"):
+                 stage="combination"):
                  
         super(Fusion_with_resnet, self).__init__()
         if norm_layer is None:
