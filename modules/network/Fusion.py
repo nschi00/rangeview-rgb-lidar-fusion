@@ -1,18 +1,17 @@
-from third_party.Mask2Former.mask2former.modeling.backbone.swin \
-    import PatchEmbed
-from transformers import Mask2FormerModel
-from torch.nn import functional as F
-from timm.models.layers import to_2tuple, trunc_normal_
-from third_party.SwinFusion.models.network_swinfusion \
-    import Cross_BasicLayer, PatchUnEmbed
-from ResNet import BasicBlock, BasicConv2d, conv1x1
-from torchvision.models.segmentation import deeplabv3_resnet50
-import torch
-import torch.nn as nn
 import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
+
+from third_party.Mask2Former.mask2former.modeling.backbone.swin import PatchEmbed
+from transformers import Mask2FormerModel
+from torch.nn import functional as F
+from timm.models.layers import to_2tuple, trunc_normal_
+from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, PatchUnEmbed
+from ResNet import BasicBlock, BasicConv2d, conv1x1
+from torchvision.models.segmentation import deeplabv3_resnet50
+import torch
+import torch.nn as nn
 
 
 """ This is a torch way of getting the intermediate layers
@@ -82,8 +81,10 @@ class BackBone(nn.Module):
             self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
 
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([Upscale_head(
-                    hidden_dim[i], 128, (8, 16), get_smaller(in_size, output_res[i])) for i in range(3)])
+                self.upscale_layers = nn.ModuleList([
+                    Upscale_head(
+                        hidden_dim[i], 128, (8, 16), get_smaller(in_size, output_res[i]))
+                    for i in range(3)])
                 self.upscale_layers.append(BasicConv2d(hidden_dim[3], 128, 1))
             else:
                 self.upscale_layers = nn.ModuleList(
@@ -124,19 +125,15 @@ class BackBone(nn.Module):
             masks_queries_logits = x.masks_queries_logits
             del x
 
-            class_queries_logits = [class_queries_logits[-i]
-                                    for i in range(1, 8, 2)]
-            masks_queries_logits = [masks_queries_logits[-i]
-                                    for i in range(1, 8, 2)]
-
-            for i in range(len(class_queries_logits) if self.fuse_all else 1):
-                masks_classes = class_queries_logits[i]
+            for i in range(1, 8, 2):
+                masks_classes = class_queries_logits[-i]
                 # [batch_size, num_queries, height, width]
-                masks_probs = masks_queries_logits[i]
+                masks_probs = masks_queries_logits[-i]
                 # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
-                out = torch.einsum("bqc, bqhw -> bchw",
-                                   masks_classes, masks_probs)
+                out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
                 outputs.append(out)
+                if not self.fuse_all:
+                    break
         else:
             for i in range(len(self.layer_list)):
                 if type(x[self.layer_list[i]]) == tuple:
