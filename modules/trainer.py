@@ -16,9 +16,11 @@ from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
-
+from dataset.kitti.parser import Parser
+from modules.network.ResNet import ResNet_34
+from modules.network.Fusion import Fusion
 from tqdm import tqdm
-
+from modules.losses.boundary_loss import BoundaryLoss
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -44,11 +46,9 @@ class Trainer():
     def __init__(self, ARCH, DATA, datadir, logdir, path=None):
         # parameters
         self.ARCH = ARCH
-        self.DATA = DATA
         self.datadir = datadir
         self.log = logdir
         self.path = path
-
         self.batch_time_t = AverageMeter()
         self.data_time_t = AverageMeter()
         self.batch_time_e = AverageMeter()
@@ -66,16 +66,15 @@ class Trainer():
                      "best_val_iou": 0}
 
         # get the data
-        from dataset.kitti.parser import Parser
         self.parser = Parser(root=self.datadir,
-                             # self.DATA["split"]["valid"] + self.DATA["split"]["train"] if finetune with valid
-                             train_sequences=self.DATA["split"]["train"],
-                             valid_sequences=self.DATA["split"]["valid"],
+                             # DATA["split"]["valid"] + DATA["split"]["train"] if finetune with valid
+                             train_sequences=DATA["split"]["train"],
+                             valid_sequences=DATA["split"]["valid"],
                              test_sequences=None,
-                             labels=self.DATA["labels"],
-                             color_map=self.DATA["color_map"],
-                             learning_map=self.DATA["learning_map"],
-                             learning_map_inv=self.DATA["learning_map_inv"],
+                             labels=DATA["labels"],
+                             color_map=DATA["color_map"],
+                             learning_map=DATA["learning_map"],
+                             learning_map_inv=DATA["learning_map_inv"],
                              sensor=self.ARCH["dataset"]["sensor"],
                              max_points=self.ARCH["dataset"]["max_points"],
                              batch_size=self.ARCH["train"]["batch_size"],
@@ -102,56 +101,36 @@ class Trainer():
         print("Loss weights from content: ", self.loss_w.data)
 
         with torch.no_grad():
-            if self.ARCH["train"]["pipeline"] == "hardnet":
-                from modules.network.HarDNet import HarDNet
-                self.model = HarDNet(
-                    self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
             if self.ARCH["train"]["pipeline"] == "res":
-                from modules.network.ResNet import ResNet_34
-                self.model = ResNet_34(
-                    self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+                self.model = ResNet_34(self.parser.get_n_classes(),
+                                       self.ARCH["train"]["aux_loss"])
 
-            if self.ARCH["train"]["pipeline"] == "fusion":
-                from modules.network.Fusion import Fusion_with_resnet
-                self.model = Fusion_with_resnet(self.parser.get_n_classes(),
-                                                self.ARCH["train"]["aux_loss"],
-                                                use_att=self.ARCH["fusion"]["use_att"],
-                                                fusion_scale=self.ARCH["fusion"]["fuse_all"],
-                                                name_backbone=self.ARCH["fusion"]["name_backbone"],
-                                                branch_type=self.ARCH["fusion"]["branch_type"],
-                                                stage=self.ARCH["fusion"]["stage"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+            elif self.ARCH["train"]["pipeline"] == "fusion":
+                F_config = ARCH["fusion"]
+                self.model = Fusion(nclasses=self.parser.get_n_classes(),
+                                    aux=self.ARCH["train"]["aux_loss"],
+                                    use_att=F_config["use_att"],
+                                    fusion_scale=F_config["fuse_all"],
+                                    name_backbone=F_config["name_backbone"],
+                                    branch_type=F_config["branch_type"],
+                                    stage=F_config["stage"])
 
-            if self.ARCH["train"]["pipeline"] == "fid":
-                from modules.network.Fid import ResNet_34
-                self.model = ResNet_34(
-                    self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+            if self.ARCH["train"]["act"] == "Hardswish":
+                convert_relu_to_softplus(self.model, nn.Hardswish())
+            elif self.ARCH["train"]["act"] == "SiLU":
+                convert_relu_to_softplus(self.model, nn.SiLU())
 
         save_to_log(self.log, 'model.txt', str(self.model))
-        pytorch_total_params = sum(
-            p.numel() for p in self.model.parameters() if p.requires_grad)
+        pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"],
-                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv",
-                                    self.ARCH["fusion"]["fuse_all"],
+
+        print("{}_{}_{}_{}". format(F_config["name_backbone"],
+                                    "ca" if F_config["use_att"] else "conv",
+                                    F_config["fuse_all"],
                                     "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        if self.ARCH["fusion"]["name_backbone"] == "mask2former":
-            print("{}_{}".format(
-                self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
+        if F_config["name_backbone"] == "mask2former":
+            print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
 
         print("Please verify your settings before continue.")
         time.sleep(7)
@@ -184,7 +163,6 @@ class Trainer():
 
         self.criterion = nn.NLLLoss(weight=self.loss_w).to(self.device)
         self.ls = Lovasz_softmax(ignore=0).to(self.device)
-        from modules.losses.boundary_loss import BoundaryLoss
         self.bd = BoundaryLoss().to(self.device)
         # loss as dataparallel too (more images in batch)
         if self.n_gpus > 1:
@@ -199,33 +177,41 @@ class Trainer():
         main resnet model prefer cosine annealing with max lr = 0.01
         swin fusion prefer adam with MULTISTEPLR (need to check document)
         """
-        if self.ARCH["train"]["scheduler"] == "consine":
-            length = self.parser.get_train_size()
-            dict = self.ARCH["train"]["consine"]
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=dict["min_lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
-                                                           T_0=dict["first_cycle"] * length, T_mult=dict["cycle"],
-                                                           eta_max=dict["max_lr"],
-                                                           T_up=dict["wup_epochs"] * length, gamma=dict["gamma"])
+        scheduler_type = self.ARCH["train"]["scheduler"]
+        scheduler_config = self.ARCH["train"][scheduler_type]
+        steps_per_epoch = self.parser.get_train_size()
+        lr = self.ARCH["train"]["lr"] if scheduler_type == "decay" else scheduler_config["min_lr"]
+        momentum = self.ARCH["train"]["momentum"]
+        self.optimizer = optim.SGD(self.model.parameters(),
+                                   lr=lr,  # min_lr
+                                   momentum=momentum,
+                                   weight_decay=self.ARCH["train"]["w_decay"])
 
-        else:
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=self.ARCH["train"]["decay"]["lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            steps_per_epoch = self.parser.get_train_size()
-            up_steps = int(self.ARCH["train"]["decay"]
-                           ["wup_epochs"] * steps_per_epoch)
-            final_decay = self.ARCH["train"]["decay"]["lr_decay"] ** (
-                1 / steps_per_epoch)
+        if scheduler_type == "cosine":
+            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
+                                                           T_0=scheduler_config["first_cycle"] * steps_per_epoch,
+                                                           T_mult=scheduler_config["cycle"],  # cycle
+                                                           eta_max=scheduler_config["max_lr"],  # max_lr
+                                                           T_up=scheduler_config["wup_epochs"] * steps_per_epoch,
+                                                           gamma=scheduler_config["gamma"])  # gamma
+
+        elif scheduler_type == "decay":
+            up_steps = int(scheduler_config["wup_epochs"] * steps_per_epoch)  # wup_epochs
+            final_decay = scheduler_config["lr_decay"] ** (1 / steps_per_epoch)  # lr_decay
             self.scheduler = warmupLR(optimizer=self.optimizer,
-                                      lr=self.ARCH["train"]["decay"]["lr"],
+                                      lr=lr,  # lr
                                       warmup_steps=up_steps,
-                                      momentum=self.ARCH["train"]["momentum"],
+                                      momentum=momentum,
                                       decay=final_decay)
+
+        if F_config["use_att"]:
+            self.optimizer_att = optim.Adam(self.model.fusion.parameters(),
+                                            lr=F_config["lr"],
+                                            weight_decay=F_config["w_decay"])
+
+            self.scheduler_att = optim.lr_scheduler.MultiStepLR(self.optimizer_att,
+                                                                milestones=F_config["milestones"],
+                                                                gamma=F_config["gamma"])
 
         if self.path is not None:
             torch.nn.Module.dump_patches = True
@@ -240,11 +226,11 @@ class Trainer():
             print("info", w_dict['info'])
 
     def calculate_estimate(self, epoch, iter):
-        estimate = int((self.data_time_t.avg + self.batch_time_t.avg) *
-                       (self.parser.get_train_size() * self.ARCH['train']['max_epochs'] - (
-                           iter + 1 + epoch * self.parser.get_train_size()))) + \
-            int(self.batch_time_e.avg * self.parser.get_valid_size() * (
-                self.ARCH['train']['max_epochs'] - (epoch)))
+        steps_per_epoch = self.parser.get_train_size()
+        max_epochs = self.ARCH['train']['max_epochs']
+        estimate = int((self.data_time_t.avg + self.batch_time_t.avg) * (steps_per_epoch * max_epochs - (iter + 1 +
+                       epoch * steps_per_epoch))) + int(self.batch_time_e.avg * self.parser.get_valid_size() *
+                                                        (max_epochs - (epoch)))
         return str(datetime.timedelta(seconds=estimate))
 
     @staticmethod
@@ -297,7 +283,6 @@ class Trainer():
                 cv2.imwrite(name, img)
 
     def train(self):
-
         self.ignore_class = []
         for i, w in enumerate(self.loss_w):
             if w < 1e-10:
@@ -305,9 +290,9 @@ class Trainer():
                 print("Ignoring class ", i, " in IoU evaluation")
         self.evaluator = iouEval(self.parser.get_n_classes(),
                                  self.device, self.ignore_class)
-        save_to_log(self.log, 'log.txt', time.strftime(
-            "%Y-%m-%d %H:%M:%S", time.localtime()))
-        if self.path is not None:
+        save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+
+        if self.path is not None:  # *validate model if loaded from checkpoint
             acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
                                                      model=self.model,
                                                      criterion=self.criterion,
@@ -426,7 +411,7 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _ = proj_data
+            in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
@@ -436,12 +421,8 @@ class Trainer():
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    out = model(in_vol, rgb_data)  # [output, z2, z4, z8]
-                else:
-                    out = model(in_vol)
+                out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
-
                 if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
                     out = [out]
 
@@ -529,7 +510,6 @@ class Trainer():
                     epoch, i, len(train_loader), batch_time=self.batch_time_t,
                     data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
                     estim=self.calculate_estimate(epoch, i))
-                
                 save_to_log(self.log, 'log.txt', message)
             # step scheduler
             scheduler.step()

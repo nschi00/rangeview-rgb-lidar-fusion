@@ -8,9 +8,9 @@ train:
   aux_loss: True
   overfit: False
   lamda: 1.0
-  scheduler: "consine"  # "consine" or "decay"
+  scheduler: "cosine"  # "cosine" or "decay"
   max_epochs: 100
-  consine:
+  cosine:
     min_lr: 0.0001
     max_lr: 0.01
     first_cycle: 50

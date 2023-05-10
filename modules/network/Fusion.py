@@ -150,7 +150,7 @@ class BackBone(nn.Module):
         return outputs
 
 
-class Fusion_with_resnet(nn.Module):
+class Fusion(nn.Module):
     """
     All scale fusion with resnet50 backbone
     Basic fusion with torch.cat + conv1x1
@@ -165,7 +165,7 @@ class Fusion_with_resnet(nn.Module):
                  norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='all_early',
                  name_backbone="mask2former", branch_type="semantic", stage="combination"):
 
-        super(Fusion_with_resnet, self).__init__()
+        super(Fusion, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
@@ -192,16 +192,14 @@ class Fusion_with_resnet(nn.Module):
         self.base_width = width_per_group
 
         self.initial_conv = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
-                                          BasicConv2d(
-                                              64, 128, kernel_size=3, padding=1),
+                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
                                           BasicConv2d(128, 128, kernel_size=3, padding=1))
 
         self.inplanes = 128
 
         self.unet_layers = nn.ModuleList()
         for i, j in enumerate([1, 2, 2, 2]):
-            self.unet_layers.append(self._make_layer(
-                block, 128, layers[i], stride=j))
+            self.unet_layers.append(self._make_layer(block, 128, layers[i], stride=j))
 
         self.end_conv = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
                                       BasicConv2d(256, 128, kernel_size=3, padding=1))
@@ -211,8 +209,7 @@ class Fusion_with_resnet(nn.Module):
         if self.aux:
             self.aux_heads = nn.ModuleDict()
             for i in range(2, 5):
-                self.aux_heads["layer{}".format(
-                    i)] = nn.Conv2d(128, nclasses, 1)
+                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
         if not use_att:
@@ -463,7 +460,7 @@ class Cross_SW_Attention(nn.Module):
 
 if __name__ == "__main__":
     import time
-    model = Fusion_with_resnet(20).cuda()
+    model = Fusion(20).cuda()
     print(model)
 
     pytorch_total_params = sum(p.numel()
