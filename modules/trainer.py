@@ -81,7 +81,8 @@ class Trainer():
                                           workers=self.ARCH["train"]["workers"],
                                           gt=True,
                                           shuffle_train=True,
-                                          overfit= self.ARCH["train"]["overfit"])
+                                          overfit= self.ARCH["train"]["overfit"],
+                                          share_subset_train=self.ARCH["train"]["share_subset_train"])
 
         # weights for loss (and bias)
 
