@@ -7,8 +7,7 @@ from shutil import copyfile
 import yaml
 import os
 from modules.trainer import Trainer
-import sys
-#sys.path.append('/home/son/project/praktikum/CENet-fusion/modules/network')
+
 
 if __name__ == '__main__':
 
@@ -22,7 +21,7 @@ if __name__ == '__main__':
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+        torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
 #         torch.backends.cudnn.deterministic = True
         print("We use the seed: {}".format(seed))
     seed_torch()
