@@ -81,7 +81,8 @@ class Trainer():
                                           workers=self.ARCH["train"]["workers"],
                                           gt=True,
                                           shuffle_train=True,
-                                          overfit= self.ARCH["train"]["overfit"])
+                                          overfit= self.ARCH["train"]["overfit"],
+                                          share_subset_train=self.ARCH["train"]["share_subset_train"])
 
         # weights for loss (and bias)
 
@@ -135,6 +136,7 @@ class Trainer():
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
+        print("Using {:.2f}% of the training data.".format(self.ARCH["train"]["share_subset_train"]*100))
         print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"], 
                                     "ca" if self.ARCH["fusion"]["use_att"] else "conv", 
                                     self.ARCH["fusion"]["fuse_all"], 
