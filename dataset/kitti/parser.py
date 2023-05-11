@@ -404,7 +404,6 @@ class Parser():
                                                    drop_last=True)
     assert len(self.trainloader) > 0
     self.trainiter = iter(self.trainloader)
-    
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=False,

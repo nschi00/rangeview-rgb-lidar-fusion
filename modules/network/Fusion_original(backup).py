@@ -113,7 +113,7 @@ class BackBone(nn.Module):
 
         return outputs
 
-class Fusion_with_resnet(nn.Module):
+class Fusion(nn.Module):
     """
     All scale fusion with resnet50 backbone
     Basic fusion with torch.cat + conv1x1
@@ -126,7 +126,7 @@ class Fusion_with_resnet(nn.Module):
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64, use_att = False, fusion_scale='all', name_backbone="resnet50", branch_type="semantic",
                  only_enc=False):
-        super(Fusion_with_resnet, self).__init__()
+        super(Fusion, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
@@ -427,7 +427,7 @@ class Cross_SW_Attention(nn.Module):
 
 if __name__ == "__main__":
     import time
-    model = Fusion_with_resnet(20).cuda()
+    model = Fusion(20).cuda()
     print(model)
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")

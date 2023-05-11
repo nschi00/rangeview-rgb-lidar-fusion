@@ -1,17 +1,6 @@
-import sys
-sys.path.append('/home/son/project/pham_wrapper/CENet')
-
 import torch.nn as nn
 import torch
 from torch.nn import functional as F
-import numpy as np
-# from torchvision.models.segmentation import fcn_resnet50, FCN_ResNet50_Weights, deeplabv3_resnet50
-# from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
-
-# from third_party.SwinFusion.models.network_swinfusion import SwinFusion as net
-from torchvision.transforms.transforms import Resize
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -36,6 +25,8 @@ class BasicConv2d(nn.Module):
             self.relu = nn.LeakyReLU()
 
     def forward(self, x):
+        if type(x) == tuple or type(x) == list:
+            x = torch.cat(x, dim=1)
         x = self.conv(x)
         x = self.bn(x)
         if self.relu:
@@ -162,7 +153,7 @@ class ResNet_34(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, _):
 
         x = self.conv1(x)
         x = self.conv2(x)
@@ -199,162 +190,10 @@ class ResNet_34(nn.Module):
         else:
             return out
 
-class Fusion(nn.Module):
-    def __init__(self, nclasses, aux=False, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True, zero_init_residual=False,
-                 norm_layer=None, groups=1, width_per_group=64):
-        super(Fusion, self).__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        self._norm_layer = norm_layer
-        self.if_BN = if_BN
-        self.dilation = 1
-        self.aux = aux
-
-        self.groups = groups
-        self.base_width = width_per_group
-
-        self.conv1 = BasicConv2d(5, 64, kernel_size=3, padding=1)
-        self.conv2 = BasicConv2d(64, 128, kernel_size=3, padding=1)
-        self.conv3 = BasicConv2d(128, 128, kernel_size=3, padding=1)
-
-        self.inplanes = 128
-
-        self.layer1 = self._make_layer(block, 128, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 128, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 128, layers[3], stride=2)
-
-        self.conv_1 = BasicConv2d(640, 256, kernel_size=3, padding=1)
-        self.conv_2 = BasicConv2d(256, 128, kernel_size=3, padding=1)
-        self.semantic_output = nn.Conv2d(128, nclasses, 1)
-
-        if self.aux:
-            self.aux_head1 = nn.Conv2d(128, nclasses, 1)
-            self.aux_head2 = nn.Conv2d(128, nclasses, 1)
-            self.aux_head3 = nn.Conv2d(128, nclasses, 1)
-
-        self.processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-panoptic")
-        self.mask2former = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-panoptic")
-
-        self.conv_fusion1 = BasicConv2d(228, 128, kernel_size=1)
-        # self.conv_fusion2 = BasicConv2d(384, 128, kernel_size=1)
-        # self.conv_fusion3 = BasicConv2d(384, 128, kernel_size=1)
-        # self.conv_fusion4 = BasicConv2d(384, 128, kernel_size=1)
-
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
-        norm_layer = self._norm_layer
-        downsample = None
-        previous_dilation = self.dilation
-        if dilate:
-            self.dilation *= stride
-            stride = 1
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            if self.if_BN:
-                downsample = nn.Sequential(
-                    conv1x1(self.inplanes, planes * block.expansion, stride),
-                    norm_layer(planes * block.expansion),
-                )
-            else:
-                downsample = nn.Sequential(
-                    conv1x1(self.inplanes, planes * block.expansion, stride)
-                )
-
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, previous_dilation, if_BN=self.if_BN))
-        self.inplanes = planes * block.expansion
-        for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, dilation=self.dilation,
-                                if_BN=self.if_BN))
-
-        return nn.Sequential(*layers)
-
-    def forward(self, x, rgb):
-        rgb_input = self.processor(images=list(rgb), return_tensors="pt").to(self.device)
-        # with torch.no_grad():
-        mask2former_results = self.mask2former(**rgb_input, output_hidden_states=True)
-            ## outputs feature maps of width/height 12x12, 24x24, 48x48, (bs, 256, 96, 96)
-        
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)    # (bs, 128, 64, 512)
-        m = F.interpolate(mask2former_results['masks_queries_logits'], size=x.size()[2:], mode='bilinear', align_corners=True)
-        x = self.conv_fusion1(torch.cat((x, m), dim=1))
-
-        x_1 = self.layer1(x)  # 1      (bs, 128, 64, 512)
-        # m_1 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][2], size=x_1.size()[2:], mode='bilinear', align_corners=True)
-        # x_1 = self.conv_fusion2(torch.cat((x_1, m_1), dim=1))
-        x_2 = self.layer2(x_1)  # 1/2  (bs, 128, 32, 256)
-        # m_2 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][1], size=x_2.size()[2:], mode='bilinear', align_corners=True)
-        # x_2 = self.conv_fusion3(torch.cat((x_2, m_2), dim=1))
-        x_3 = self.layer3(x_2)  # 1/4  (bs, 128, 16, 128)
-        # m_3 = F.interpolate(mask2former_results['pixel_decoder_hidden_states'][0], size=x_3.size()[2:], mode='bilinear', align_corners=True)
-        # x_3 = self.conv_fusion4(torch.cat((x_3, m_3), dim=1))
-        x_4 = self.layer4(x_3)  # 1/8  (bs, 128, 8, 64)
-
-        res_2 = F.interpolate(x_2, size=x.size()[2:], mode='bilinear', align_corners=True)
-        res_3 = F.interpolate(x_3, size=x.size()[2:], mode='bilinear', align_corners=True)
-        res_4 = F.interpolate(x_4, size=x.size()[2:], mode='bilinear', align_corners=True)
-        res = [x, x_1, res_2, res_3, res_4]
-
-        out = torch.cat(res, dim=1)
-        out = self.conv_1(out)
-        out = self.conv_2(out)
-        out = self.semantic_output(out)
-        out = F.softmax(out, dim=1)
-
-        if self.aux:
-            res_2 = self.aux_head1(res_2)
-            res_2 = F.softmax(res_2, dim=1)
-
-            res_3 = self.aux_head2(res_3)
-            res_3 = F.softmax(res_3, dim=1)
-
-            res_4 = self.aux_head3(res_4)
-            res_4 = F.softmax(res_4, dim=1)
-
-        if self.aux:
-            return [out, res_2, res_3, res_4]
-        else:
-            return out
-
-
-       
-
-class FeatureExtractionBlock(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv2d(5, 128, kernel_size=1, stride=1, padding=0, bias=False)
-        self.conv2 = nn.Conv2d(5, 128, kernel_size=3, stride=1, padding=1, bias=False)
-        self.conv3 = nn.Conv2d(5, 128, kernel_size=5, stride=1, padding=2, bias=False)
-
-        self.final_conv = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(128)
-        self.bn2 = nn.BatchNorm2d(128)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.bn_final = nn.BatchNorm2d(256)
-
-        self.activation = nn.ReLU(inplace=True)
-    
-    def forward(self, x):
-        x1, x2, x3 = self.conv1(x), self.conv2(x), self.conv3(x)
-        x1, x2, x3 = self.bn1(x1), self.bn2(x2), self.bn3(x3)
-        x1, x2, x3 = self.activation(x1), self.activation(x2), self.activation(x3)
-        x = x1+x2+x3
-        x = self.final_conv(x)
-        x = self.bn_final(x)
-        x_feature = self.activation(x)
-   
-
-        return x_feature
-
 
 if __name__ == "__main__":
     import time
-    model = Fusion(20).cuda()
+    model = ResNet_34(20).cuda()
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []
@@ -363,13 +202,13 @@ if __name__ == "__main__":
         input_rgb = torch.randn(2, 3, 452, 1032).cuda()
         model.eval()
         with torch.no_grad():
-          start_time = time.time()
-          outputs = model(input_3D, input_rgb)
+            start_time = time.time()
+            outputs = model(input_3D, input_rgb)
         torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
         fwt = time.time() - start_time
         time_train.append(fwt)
-        print ("Forward time per img: %.3f (Mean: %.3f)" % (
-          fwt / 1, sum(time_train) / len(time_train) / 1))
+        print("Forward time per img: %.3f (Mean: %.3f)" % (
+            fwt / 1, sum(time_train) / len(time_train) / 1))
         time.sleep(0.15)
 
     # for i in range(20):
@@ -384,7 +223,3 @@ if __name__ == "__main__":
     #     print ("Forward time per img: %.3f (Mean: %.3f)" % (
     #       fwt / 1, sum(time_train) / len(time_train) / 1))
     #     time.sleep(0.15)
-
-
-
-

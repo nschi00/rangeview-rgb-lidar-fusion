@@ -9,9 +9,9 @@ train:
   overfit: True
   share_subset_train: 1  # share of data used for training; overfit has to be false
   lamda: 1.0
-  scheduler: "consine"  # "consine" or "decay"
+  scheduler: "cosine"  # "cosine" or "decay"
   max_epochs: 5000
-  consine:
+  cosine:
     min_lr: 0.0001
     max_lr: 0.01
     first_cycle: 150

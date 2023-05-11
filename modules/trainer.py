@@ -4,6 +4,7 @@ import datetime
 import os
 import time
 import cv2
+import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.optim as optim
@@ -15,10 +16,11 @@ from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
-
+from dataset.kitti.parser import Parser
+from modules.network.ResNet import ResNet_34
+from modules.network.Fusion import Fusion
 from tqdm import tqdm
-
-
+from modules.losses.boundary_loss import BoundaryLoss
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -29,9 +31,9 @@ def save_to_log(logdir, logfile, message):
 
 def save_checkpoint(to_save, logdir, suffix=".pth"):
     # Save the weights
-    torch.save(to_save, logdir +
-               "/SENet" + suffix)
-    
+    torch.save(to_save, logdir + "/SENet" + suffix)
+
+
 def convert_relu_to_softplus(model, act):
     for child_name, child in model.named_children():
         if isinstance(child, nn.LeakyReLU):
@@ -44,11 +46,9 @@ class Trainer():
     def __init__(self, ARCH, DATA, datadir, logdir, path=None):
         # parameters
         self.ARCH = ARCH
-        self.DATA = DATA
         self.datadir = datadir
         self.log = logdir
         self.path = path
-
         self.batch_time_t = AverageMeter()
         self.data_time_t = AverageMeter()
         self.batch_time_e = AverageMeter()
@@ -66,88 +66,78 @@ class Trainer():
                      "best_val_iou": 0}
 
         # get the data
-        from dataset.kitti.parser import Parser
         self.parser = Parser(root=self.datadir,
-                                          train_sequences=self.DATA["split"]["train"], # self.DATA["split"]["valid"] + self.DATA["split"]["train"] if finetune with valid
-                                          valid_sequences=self.DATA["split"]["valid"],
-                                          test_sequences=None,
-                                          labels=self.DATA["labels"],
-                                          color_map=self.DATA["color_map"],
-                                          learning_map=self.DATA["learning_map"],
-                                          learning_map_inv=self.DATA["learning_map_inv"],
-                                          sensor=self.ARCH["dataset"]["sensor"],
-                                          max_points=self.ARCH["dataset"]["max_points"],
-                                          batch_size=self.ARCH["train"]["batch_size"],
-                                          workers=self.ARCH["train"]["workers"],
-                                          gt=True,
-                                          shuffle_train=True,
-                                          overfit= self.ARCH["train"]["overfit"],
-                                          share_subset_train=self.ARCH["train"]["share_subset_train"])
+                             # DATA["split"]["valid"] + DATA["split"]["train"] if finetune with valid
+                             train_sequences=DATA["split"]["train"],
+                             valid_sequences=DATA["split"]["valid"],
+                             test_sequences=None,
+                             labels=DATA["labels"],
+                             color_map=DATA["color_map"],
+                             learning_map=DATA["learning_map"],
+                             learning_map_inv=DATA["learning_map_inv"],
+                             sensor=self.ARCH["dataset"]["sensor"],
+                             max_points=self.ARCH["dataset"]["max_points"],
+                             batch_size=self.ARCH["train"]["batch_size"],
+                             workers=self.ARCH["train"]["workers"],
+                             gt=True,
+                             shuffle_train=True,
+                             overfit=self.ARCH["train"]["overfit"])
 
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
         content = torch.zeros(self.parser.get_n_classes(), dtype=torch.float)
         for cl, freq in DATA["content"].items():
-            x_cl = self.parser.to_xentropy(cl)  # map actual class to xentropy class
+            # map actual class to xentropy class
+            x_cl = self.parser.to_xentropy(cl)
             content[x_cl] += freq
         self.loss_w = 1 / (content + epsilon_w)  # get weights
 
-
-        for x_cl, w in enumerate(self.loss_w):  # ignore the ones necessary to ignore
+        # ignore the ones necessary to ignore
+        for x_cl, w in enumerate(self.loss_w):
             if DATA["learning_ignore"][x_cl]:
                 # don't weigh
                 self.loss_w[x_cl] = 0
         print("Loss weights from content: ", self.loss_w.data)
 
         with torch.no_grad():
-            if self.ARCH["train"]["pipeline"] == "hardnet":
-                from modules.network.HarDNet import HarDNet
-                self.model = HarDNet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
             if self.ARCH["train"]["pipeline"] == "res":
-                from modules.network.ResNet import ResNet_34
-                self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
-            
-            if self.ARCH["train"]["pipeline"] == "fusion":
-                from modules.network.Fusion import Fusion_with_resnet
-                self.model = Fusion_with_resnet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"], use_att=self.ARCH["fusion"]["use_att"],
-                                                fusion_scale=self.ARCH["fusion"]["fuse_all"], name_backbone=self.ARCH["fusion"]["name_backbone"],
-                                                branch_type=self.ARCH["fusion"]["branch_type"], stage=self.ARCH["fusion"]["stage"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+                self.model = ResNet_34(self.parser.get_n_classes(),
+                                       self.ARCH["train"]["aux_loss"])
 
-            if self.ARCH["train"]["pipeline"] == "fid":
-                from modules.network.Fid import ResNet_34
-                self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
+            elif self.ARCH["train"]["pipeline"] == "fusion":
+                F_config = ARCH["fusion"]
+                self.model = Fusion(nclasses=self.parser.get_n_classes(),
+                                    aux=self.ARCH["train"]["aux_loss"],
+                                    use_att=F_config["use_att"],
+                                    fusion_scale=F_config["fuse_all"],
+                                    name_backbone=F_config["name_backbone"],
+                                    branch_type=F_config["branch_type"],
+                                    stage=F_config["stage"])
 
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+            if self.ARCH["train"]["act"] == "Hardswish":
+                convert_relu_to_softplus(self.model, nn.Hardswish())
+            elif self.ARCH["train"]["act"] == "SiLU":
+                convert_relu_to_softplus(self.model, nn.SiLU())
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        print("Number of parameters: ", pytorch_total_params/1000000, "M")
+        print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-        print("Using {:.2f}% of the training data.".format(self.ARCH["train"]["share_subset_train"]*100))
-        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"], 
-                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv", 
-                                    self.ARCH["fusion"]["fuse_all"], 
+
+        print("{}_{}_{}_{}". format(F_config["name_backbone"],
+                                    "ca" if F_config["use_att"] else "conv",
+                                    F_config["fuse_all"],
+
                                     "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        if self.ARCH["fusion"]["name_backbone"] == "mask2former":
-            print("{}_{}".format(self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
+        if F_config["name_backbone"] == "mask2former":
+            print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
 
         print("Please verify your settings before continue.")
         time.sleep(7)
 
-        save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
+        save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
+            pytorch_total_params / 1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
 
         # GPU?
@@ -155,7 +145,8 @@ class Trainer():
         self.multi_gpu = False
         self.n_gpus = 0
         self.model_single = self.model
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
         print("Training in device: ", self.device)
         if torch.cuda.is_available() and torch.cuda.device_count() > 0:
             cudnn.benchmark = True
@@ -171,14 +162,13 @@ class Trainer():
             self.multi_gpu = True
             self.n_gpus = torch.cuda.device_count()
 
-
         self.criterion = nn.NLLLoss(weight=self.loss_w).to(self.device)
         self.ls = Lovasz_softmax(ignore=0).to(self.device)
-        from modules.losses.boundary_loss import BoundaryLoss
         self.bd = BoundaryLoss().to(self.device)
         # loss as dataparallel too (more images in batch)
         if self.n_gpus > 1:
-            self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
+            self.criterion = nn.DataParallel(
+                self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
         """
@@ -188,30 +178,51 @@ class Trainer():
         main resnet model prefer cosine annealing with max lr = 0.01
         swin fusion prefer adam with MULTISTEPLR (need to check document)
         """
-        if self.ARCH["train"]["scheduler"] == "consine":
-            length = self.parser.get_train_size()
-            dict = self.ARCH["train"]["consine"]
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=dict["min_lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
-                                                           T_0=dict["first_cycle"] * length, T_mult=dict["cycle"],
-                                                           eta_max=dict["max_lr"],
-                                                           T_up=dict["wup_epochs"]*length, gamma=dict["gamma"])
+
+        scheduler_type = self.ARCH["train"]["scheduler"]
+        scheduler_config = self.ARCH["train"][scheduler_type]
+        steps_per_epoch = self.parser.get_train_size()
+        lr = scheduler_config["lr"] if scheduler_type == "decay" else scheduler_config["min_lr"]
+        momentum = self.ARCH["train"]["momentum"]
+
+        # * Create Adam optimizer for cross attention fusion module
+        if F_config["use_att"]:
+            fusion_params = self.model.fusion_layer.parameters()
+            rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
+
+            self.att_optimizer = optim.Adam(fusion_params,
+                                            lr=F_config["lr"],
+                                            weight_decay=F_config["w_decay"])
+
+            self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
+                                                                milestones=F_config["scheduler_milestones"],
+                                                                gamma=F_config["scheduler_gamma"])
 
         else:
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=self.ARCH["train"]["decay"]["lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            steps_per_epoch = self.parser.get_train_size()
-            up_steps = int(self.ARCH["train"]["decay"]["wup_epochs"] * steps_per_epoch)
-            final_decay = self.ARCH["train"]["decay"]["lr_decay"] ** (1 / steps_per_epoch)
+            self.att_optimizer = None
+            self.att_scheduler = None
+            rest_params = self.model.parameters()
+
+        self.optimizer = optim.SGD(rest_params,
+                                   lr=lr,  # min_lr
+                                   momentum=momentum,
+                                   weight_decay=self.ARCH["train"]["w_decay"])
+
+        if scheduler_type == "cosine":
+            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
+                                                           T_0=scheduler_config["first_cycle"] * steps_per_epoch,
+                                                           T_mult=scheduler_config["cycle"],  # cycle
+                                                           eta_max=scheduler_config["max_lr"],  # max_lr
+                                                           T_up=scheduler_config["wup_epochs"] * steps_per_epoch,
+                                                           gamma=scheduler_config["gamma"])  # gamma
+
+        elif scheduler_type == "decay":
+            up_steps = int(scheduler_config["wup_epochs"] * steps_per_epoch)  # wup_epochs
+            final_decay = scheduler_config["lr_decay"] ** (1 / steps_per_epoch)  # lr_decay
             self.scheduler = warmupLR(optimizer=self.optimizer,
-                                      lr=self.ARCH["train"]["decay"]["lr"],
+                                      lr=lr,  # lr
                                       warmup_steps=up_steps,
-                                      momentum=self.ARCH["train"]["momentum"],
+                                      momentum=momentum,
                                       decay=final_decay)
 
         if self.path is not None:
@@ -226,13 +237,12 @@ class Trainer():
 #             self.info = w_dict['info']
             print("info", w_dict['info'])
 
-
     def calculate_estimate(self, epoch, iter):
-        estimate = int((self.data_time_t.avg + self.batch_time_t.avg) * \
-                       (self.parser.get_train_size() * self.ARCH['train']['max_epochs'] - (
-                               iter + 1 + epoch * self.parser.get_train_size()))) + \
-                   int(self.batch_time_e.avg * self.parser.get_valid_size() * (
-                           self.ARCH['train']['max_epochs'] - (epoch)))
+        steps_per_epoch = self.parser.get_train_size()
+        max_epochs = self.ARCH['train']['max_epochs']
+        estimate = int((self.data_time_t.avg + self.batch_time_t.avg) * (steps_per_epoch * max_epochs - (iter + 1 +
+                       epoch * steps_per_epoch))) + int(self.batch_time_e.avg * self.parser.get_valid_size() *
+                                                        (max_epochs - (epoch)))
         return str(datetime.timedelta(seconds=estimate))
 
     @staticmethod
@@ -285,7 +295,6 @@ class Trainer():
                 cv2.imwrite(name, img)
 
     def train(self):
-
         self.ignore_class = []
         for i, w in enumerate(self.loss_w):
             if w < 1e-10:
@@ -294,62 +303,52 @@ class Trainer():
         self.evaluator = iouEval(self.parser.get_n_classes(),
                                  self.device, self.ignore_class)
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        if self.path is not None:
+
+        if self.path is not None:  # *validate model if loaded from checkpoint
             acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                             model=self.model,
-                                             criterion=self.criterion,
-                                             evaluator=self.evaluator,
-                                             class_func=self.parser.get_xentropy_class_string,
-                                             color_fn=self.parser.to_color,
-                                             save_scans=self.ARCH["train"]["save_scans"])
+                                                     evaluator=self.evaluator,
+                                                     class_func=self.parser.get_xentropy_class_string,
+                                                     color_fn=self.parser.to_color,
+                                                     save_scans=self.ARCH["train"]["save_scans"])
 
         # train for n epochs
         for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):
             # train for 1 epoch
 
             acc, iou, loss = self.train_epoch(train_loader=self.parser.get_train_set(),
-                                                           model=self.model,
-                                                           criterion=self.criterion,
-                                                           optimizer=self.optimizer,
-                                                           epoch=epoch,
-                                                           evaluator=self.evaluator,
-                                                           scheduler=self.scheduler,
-                                                           color_fn=self.parser.to_color,
-                                                           report=self.ARCH["train"]["report_batch"],
-                                                           show_scans=self.ARCH["train"]["show_scans"])
-
+                                              epoch=epoch,
+                                              evaluator=self.evaluator,
+                                              color_fn=self.parser.to_color,
+                                              report=self.ARCH["train"]["report_batch"],
+                                              show_scans=self.ARCH["train"]["show_scans"])
 
             # update info
             self.info["train_loss"] = loss
             self.info["train_acc"] = acc
             self.info["train_iou"] = iou
+            self.info["lr"] = self.optimizer.param_groups[0]["lr"]
+            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else None
 
             # remember best iou and save checkpoint
             state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                      'optimizer': self.optimizer.state_dict(),
                      'info': self.info,
-                     'scheduler': self.scheduler.state_dict()
+                     'scheduler': self.scheduler.state_dict(),
+                     'att_optimizer': self.att_optimizer.state_dict() if self.att_optimizer is not None else None,
+                     'att_scheduler': self.att_scheduler.state_dict() if self.att_scheduler is not None else None
                      }
-            save_checkpoint(state, self.log, suffix="")
-            # save_checkpoint(state, self.log, suffix=""+str(epoch))
+            save_checkpoint(state, self.log, suffix="_latest")
 
             if self.info['train_iou'] > self.info['best_train_iou']:
                 save_to_log(self.log, 'log.txt', "Best mean iou in training set so far, save model!")
                 print("Best mean iou in training set so far, save model!")
                 self.info['best_train_iou'] = self.info['train_iou']
-                state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
-                         'optimizer': self.optimizer.state_dict(),
-                         'info': self.info,
-                         'scheduler': self.scheduler.state_dict()
-                         }
                 save_checkpoint(state, self.log, suffix="_train_best")
 
             if epoch % self.ARCH["train"]["report_epoch"] == 0:
                 # evaluate on validation set
                 print("*" * 80)
                 acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                                         model=self.model,
-                                                         criterion=self.criterion,
                                                          evaluator=self.evaluator,
                                                          class_func=self.parser.get_xentropy_class_string,
                                                          color_fn=self.parser.to_color,
@@ -368,11 +367,6 @@ class Trainer():
                 self.info['best_val_iou'] = self.info['valid_iou']
 
                 # save the weights!
-                state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
-                         'optimizer': self.optimizer.state_dict(),
-                         'info': self.info,
-                         'scheduler': self.scheduler.state_dict()
-                         }
                 save_checkpoint(state, self.log, suffix="_valid_best")
 
             print("*" * 80)
@@ -386,18 +380,20 @@ class Trainer():
                                 model=self.model_single,
                                 img_summary=self.ARCH["train"]["save_scans"],
                                 imgs=rand_img)
-            save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+            save_to_log(self.log, 'log.txt', time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime()))
         print('Finished Training')
-        save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        save_to_log(self.log, 'log.txt', time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime()))
         return
 
-    def train_epoch(self, train_loader, model, criterion, optimizer, epoch, evaluator, scheduler, color_fn, report=10,
-                    show_scans=False):
+    def train_epoch(self, train_loader, epoch, evaluator, color_fn, report=10, show_scans=False):
         losses = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
         bd = AverageMeter()
         learning_rate = AverageMeter()
+        attention_lr = AverageMeter()
 
         # empty the cache to train now
         if self.gpu:
@@ -406,11 +402,11 @@ class Trainer():
         scaler = torch.cuda.amp.GradScaler()
 
         # switch to train mode
-        model.train()
+        self.model.train()
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _ = proj_data
+            in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
@@ -420,30 +416,31 @@ class Trainer():
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    out = model(in_vol,rgb_data) #[output, z2, z4, z8]
-                else:
-                    out = model(in_vol)
+                out = self.model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
-
-                if type(out) is not list: # IN CASE OF SINGLE OUTPUT
+                if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
                     out = [out]
 
-                ## SUM POSITION LOSSES
+                # SUM POSITION LOSSES
                 for j in range(len(out)):
                     if j == 0:
                         bdlosss = self.bd(out[j], proj_labels.long())
-                        loss_mn = criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                        loss_mn = self.criterion(torch.log(out[j].clamp(
+                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
                     else:
-                        bdlosss += lamda*self.bd(out[j], proj_labels.long())
-                        loss_mn += lamda*criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                        bdlosss += lamda * self.bd(out[j], proj_labels.long())
+                        loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
+                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
 
                 loss_m = loss_mn + bdlosss
                 output = out[0]
-               
-            optimizer.zero_grad()
+
+            # * Compute attention gradient if exsits
+            self.optimizer.zero_grad()
+            self.att_optimizer.zero_grad() if self.att_optimizer is not None else None
             scaler.scale(loss_m.sum()).backward()
-            scaler.step(optimizer)
+            scaler.step(self.optimizer)
+            scaler.step(self.att_optimizer) if self.att_optimizer is not None else None
             scaler.update()
 
             # measure accuracy and record loss
@@ -466,11 +463,10 @@ class Trainer():
             # measure elapsed time
             self.batch_time_t.update(time.time() - end)
             end = time.time()
-
-            for g in self.optimizer.param_groups:
-                lr = g["lr"]
+            lr = self.optimizer.param_groups[0]["lr"]
+            att_lr = self.att_optimizer.param_groups[0]["lr"]
             learning_rate.update(lr, 1)
-
+            attention_lr.update(att_lr, 1)
 
             if show_scans:
                 if i % self.ARCH["train"]["save_batch"] == 0:
@@ -479,7 +475,8 @@ class Trainer():
                     depth_np = in_vol[0][0].cpu().numpy()
                     pred_np = argmax[0].cpu().numpy()
                     gt_np = proj_labels[0].cpu().numpy()
-                    out = Trainer.make_log_img(depth_np, mask_np, pred_np, gt_np, color_fn)
+                    out = Trainer.make_log_img(
+                        depth_np, mask_np, pred_np, gt_np, color_fn)
 
                     directory = os.path.join(self.log, "train-predictions")
                     if not os.path.isdir(directory):
@@ -487,9 +484,9 @@ class Trainer():
                     name = os.path.join(directory, str(i) + ".png")
                     cv2.imwrite(name, out)
 
-
             if i % self.ARCH["train"]["report_batch"] == 0:
                 print('Lr: {lr:.3e} | '
+                      'Att_lr: {att_lr:.0e} | '
                       'Epoch: [{0}][{1}/{2}] | '
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
                       'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
@@ -497,27 +494,31 @@ class Trainer():
                       'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
                       'acc {acc.val:.3f} ({acc.avg:.3f}) | '
                       'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
-                    epoch, i, len(train_loader), batch_time=self.batch_time_t,
-                    data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
-                    estim=self.calculate_estimate(epoch, i)))
+                          epoch, i, len(train_loader), batch_time=self.batch_time_t,
+                          data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
+                          att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
 
-                save_to_log(self.log, 'log.txt', 'Lr: {lr:.3e} | '
-                                                 'Epoch: [{0}][{1}/{2}] | '
-                                                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
-                                                 'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
-                                                 'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
-                                                 'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
-                                                 'acc {acc.val:.3f} ({acc.avg:.3f}) | '
-                                                 'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
+                message = 'Lr: {lr:.3e} | '
+                'Att_lr: {att_lr:.0e} |'
+                'Epoch: [{0}][{1}/{2}] | '
+                'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
+                'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
+                'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
+                'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
+                'acc {acc.val:.3f} ({acc.avg:.3f}) | '
+                'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
                     epoch, i, len(train_loader), batch_time=self.batch_time_t,
                     data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
-                    estim=self.calculate_estimate(epoch, i)))
-            # step scheduler
-            scheduler.step()
+                    att_lr=att_lr, estim=self.calculate_estimate(epoch, i))
+                save_to_log(self.log, 'log.txt', message)
+
+            # * step scheduler
+            self.scheduler.step()
+            self.att_scheduler.step() if self.att_scheduler is not None else None
 
         return acc.avg, iou.avg, losses.avg
 
-    def validate(self, val_loader, model, criterion, evaluator, class_func, color_fn, save_scans):
+    def validate(self, val_loader, evaluator, class_func, color_fn, save_scans):
         losses = AverageMeter()
         jaccs = AverageMeter()
         wces = AverageMeter()
@@ -526,7 +527,7 @@ class Trainer():
         rand_imgs = []
 
         # switch to evaluate mode
-        model.eval()
+        self.model.eval()
         evaluator.reset()
 
         # empty the cache to infer in high res
@@ -545,26 +546,25 @@ class Trainer():
                 rgb_data = rgb_data.cuda()
                 # compute output
                 if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    output = model(in_vol,rgb_data)
+                    output = self.model(in_vol, rgb_data)
                 else:
-                    output = model(in_vol)
+                    output = self.model(in_vol)
 
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
-            
+
                 log_out = torch.log(output.clamp(min=1e-8))
                 jacc = self.ls(output, proj_labels)
-                wce = criterion(log_out, proj_labels)
+                wce = self.criterion(log_out, proj_labels)
                 loss = wce + jacc
 
                 # measure accuracy and record loss
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
                 losses.update(loss.mean().item(), in_vol.size(0))
-                jaccs.update(jacc.mean().item(),in_vol.size(0))
+                jaccs.update(jacc.mean().item(), in_vol.size(0))
 
-
-                wces.update(wce.mean().item(),in_vol.size(0))
+                wces.update(wce.mean().item(), in_vol.size(0))
 
                 if save_scans:
                     # get the first scan in batch and project points
@@ -618,6 +618,5 @@ class Trainer():
                 save_to_log(self.log, 'log.txt', 'IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
                     i=i, class_str=class_func(i), jacc=jacc))
                 self.info["valid_classes/" + class_func(i)] = jacc
-
 
         return acc.avg, iou.avg, losses.avg, rand_imgs
