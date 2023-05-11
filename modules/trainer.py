@@ -128,6 +128,7 @@ class Trainer():
         print("{}_{}_{}_{}". format(F_config["name_backbone"],
                                     "ca" if F_config["use_att"] else "conv",
                                     F_config["fuse_all"],
+
                                     "" if self.ARCH["train"]["aux_loss"] else "noaux"))
         if F_config["name_backbone"] == "mask2former":
             print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
