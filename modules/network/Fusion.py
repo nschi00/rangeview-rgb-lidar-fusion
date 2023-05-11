@@ -3,7 +3,6 @@ import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
 
-from third_party.Mask2Former.mask2former.modeling.backbone.swin import PatchEmbed
 from transformers import Mask2FormerModel
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
@@ -68,8 +67,7 @@ class BackBone(nn.Module):
             self.layer_list = ["encoder_hidden_states"] * 4
         elif stage == "pixel_decoder":
             hidden_dim = [256] * 4
-            self.layer_list = ["decoder_hidden_states"] * \
-                3 + ["decoder_last_hidden_state"]
+            self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]
         else:  # * stage == "combination"
             hidden_dim = [128] * 4
             self.layer_list = []  # not necessary for combination
@@ -81,14 +79,13 @@ class BackBone(nn.Module):
             self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
 
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([
-                    Upscale_head(
-                        hidden_dim[i], 128, (8, 16), get_smaller(in_size, output_res[i]))
-                    for i in range(3)])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i],
+                                                                  128, (8, 16),
+                                                                  get_smaller(in_size, output_res[i]))
+                                                     for i in range(3)])
                 self.upscale_layers.append(BasicConv2d(hidden_dim[3], 128, 1))
             else:
-                self.upscale_layers = nn.ModuleList(
-                    [Upscale_head(hidden_dim[0], 128, (8, 16), in_size)])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, (8, 16), in_size)])
 
         elif name == "mask2former":
             weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(
@@ -101,11 +98,13 @@ class BackBone(nn.Module):
                 self.class_predictor = nn.Linear(256, 128)
 
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i], 128, get_smaller(
-                    in_size, 4), get_smaller(in_size, output_res[i])) for i in range(4)])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i], 128,
+                                                                  get_smaller(in_size, 4),
+                                                                  get_smaller(in_size, output_res[i]))
+                                                     for i in range(4)])
             else:
-                self.upscale_layers = nn.ModuleList(
-                    [Upscale_head(hidden_dim[0], 128, get_smaller(in_size, 4), in_size)])
+                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128,
+                                                                  get_smaller(in_size, 4), in_size)])
 
         else:
             raise NotImplementedError
@@ -120,8 +119,8 @@ class BackBone(nn.Module):
 
         outputs = []
         if self.name == "mask2former" and self.stage == "combination":
-            class_queries_logits = self.class_predictor(torch.stack(
-                x.transformer_decoder_intermediate_states, dim=0).transpose(1, 2))
+            class_queries_logits = self.class_predictor(torch.stack(x.transformer_decoder_intermediate_states,
+                                                                    dim=0).transpose(1, 2))
             masks_queries_logits = x.masks_queries_logits
             del x
 
@@ -162,15 +161,16 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='all_early',
+                 norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='main_late',
                  name_backbone="mask2former", branch_type="semantic", stage="combination"):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
-        assert fusion_scale in ["all_early",
-                                "all_late", "main_late", "main_early"]
+        assert fusion_scale in ["all_early", "all_late", "main_late", "main_early"]
+        if use_att:
+            assert fusion_scale in ["main_early", "main_late"]
         # if fusion_scale == "main_late":
         #     assert aux == False
         # * whether to fuse all scales or only main scales
@@ -213,9 +213,9 @@ class Fusion(nn.Module):
 
         """FUSION LAYERS"""
         if not use_att:
-            self.fusion = BasicConv2d(256, 128, kernel_size=1, padding=0)
+            self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
         else:
-            self.fusion = Cross_SW_Attention()
+            self.fusion_layer = Cross_SW_Attention()
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -260,21 +260,11 @@ class Fusion(nn.Module):
         for i in range(0, 4):
             x_features[str(i + 1)] = self.unet_layers[i](x_features[str(i)])
             if self.EARLY and i == 0:
-                if self.use_att:
-                    x_features[str(
-                        i + 1)] = self.fusion(x_features[str(i + 1)], rgb_out[i])
-                else:
-                    x_features[str(
-                        i + 1)] = self.fusion(torch.cat([x_features[str(i + 1)], rgb_out[i]], dim=1))
+                x_features[str(i + 1)] = self.fusion_layer((x_features[str(i + 1)], rgb_out[i]))
                 continue
 
             if self.ALL:
-                if self.use_att:
-                    x_features[str(
-                        i + 1)] = self.fusion(x_features[str(i + 1)], rgb_out[i])
-                else:
-                    x_features[str(
-                        i + 1)] = self.fusion(torch.cat([x_features[str(i + 1)], rgb_out[i]], dim=1))
+                x_features[str(i + 1)] = self.fusion_layer((x_features[str(i + 1)], rgb_out[i]))
 
         # TODO: consider implement "all" early fusion for cross attention: very F***ing expensive
         for i in range(2, 5):
@@ -287,14 +277,11 @@ class Fusion(nn.Module):
 
         """LATE FUSION"""
         if not self.EARLY:
-            if self.use_att:
-                out = self.fusion(out, rgb_out[0])
-                # ! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
-                if out.shape != rgb_out[0].shape:
-                    out = F.interpolate(
-                        out, size=rgb_out[0].shape[2:], mode='bilinear', align_corners=True)
-            else:
-                out = self.fusion(torch.cat([out, rgb_out[0]], dim=1))
+            out = self.fusion_layer((out, rgb_out[0]))
+            # ! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
+            if out.shape != rgb_out[0].shape:
+                out = F.interpolate(
+                    out, size=rgb_out[0].shape[2:], mode='bilinear', align_corners=True)
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
@@ -406,25 +393,26 @@ class Cross_SW_Attention(nn.Module):
         self.pos_drop = nn.Dropout(p=drop)
 
         """Input resolution = Patch's resolution"""
-        self.fusion_layers = Cross_BasicLayer(dim=embed_dim,
-                                              input_resolution=(patches_resolution[0],
-                                                                patches_resolution[1]),
-                                              depth=depth,
-                                              num_heads=num_heads,
-                                              window_size=window_size,
-                                              mlp_ratio=mlp_ratio,
-                                              qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                              drop=drop, attn_drop=attn_drop,
-                                              drop_path=drop_path,
-                                              norm_layer=norm_layer)
+        self.cross_attention = Cross_BasicLayer(dim=embed_dim,
+                                                input_resolution=(patches_resolution[0],
+                                                                  patches_resolution[1]),
+                                                depth=depth,
+                                                num_heads=num_heads,
+                                                window_size=window_size,
+                                                mlp_ratio=mlp_ratio,
+                                                qkv_bias=qkv_bias, qk_scale=qk_scale,
+                                                drop=drop, attn_drop=attn_drop,
+                                                drop_path=drop_path,
+                                                norm_layer=norm_layer)
 
         self.norm_A = norm_layer(self.embed_dim)
         if fusion_type == 'double_fuse':
             self.conv_fusion = BasicBlock(256, 128, 1)
             self.norm_B = norm_layer(self.embed_dim)
 
-    def forward(self, x, y):
+    def forward(self, x):
         # * Divide image into patches
+        x, y = x
         x = self.patch_embed(x)
         y = self.patch_embed(y)
         x_size = (x.shape[2], x.shape[3])
@@ -436,12 +424,12 @@ class Cross_SW_Attention(nn.Module):
         x = self.pos_drop(x)
         y = self.pos_drop(y)
         if self.fusion_type == "x_main":
-            x, _ = self.fusion_layers(x, y, x_size)
-            x = self.norm_A(x)  # B L C
+            x, _ = self.cross_attention(x, y, x_size)
+            # x = self.norm_A(x)  # B L C
             x = self.patch_unembed(x, x_size)
 
         elif self.fusion_type == "double_fuse":
-            x, y = self.fusion_layers(x, y, x_size)
+            x, y = self.cross_attention(x, y, x_size)
             x = self.norm_Fusion_A(x)  # B L C
             x = self.patch_unembed(x, x_size)
 
@@ -457,15 +445,66 @@ class Cross_SW_Attention(nn.Module):
 
         return x
 
+class PatchEmbed(nn.Module):
+    """Image to Patch Embedding
+    Args:
+        patch_size (int): Patch token size. Default: 4.
+        in_chans (int): Number of input image channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+        norm_layer (nn.Module, optional): Normalization layer. Default: None
+    """
+
+    def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
+        super().__init__()
+        patch_size = to_2tuple(patch_size)
+        self.patch_size = patch_size
+
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        self.proj = nn.Sequential(nn.Conv2d(in_chans, embed_dim, kernel_size=1, stride=1),
+                                  nn.MaxPool2d(kernel_size=patch_size, stride=patch_size),
+                                  nn.ReLU(inplace=True))
+
+        pytorch_total_params = sum(p.numel() for p in self.proj.parameters())
+        print(pytorch_total_params)
+        if norm_layer is not None:
+            self.norm = norm_layer(embed_dim)
+        else:
+            self.norm = None
+
+    def forward(self, x):
+        """Forward function."""
+        # padding
+        _, _, H, W = x.size()
+        if W % self.patch_size[1] != 0:
+            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
+        if H % self.patch_size[0] != 0:
+            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
+
+        x = self.proj(x)  # B C Wh Ww
+        if self.norm is not None:
+            Wh, Ww = x.size(2), x.size(3)
+            x = x.flatten(2).transpose(1, 2)
+            x = self.norm(x)
+            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
+
+        return x
+
 
 if __name__ == "__main__":
     import time
-    model = Fusion(20).cuda()
+    model = Fusion(20, use_att=False, fusion_scale="main_late").cuda()
     print(model)
 
     pytorch_total_params = sum(p.numel()
                                for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
+
+    # for module_name, module in model.named_parameters():
+    #     if "fusion" in module_name:
+    #         print(module_name, module)
+
     time_train = []
     for i in range(20):
         input_3D = torch.rand(2, 5, 64, 512).cuda()

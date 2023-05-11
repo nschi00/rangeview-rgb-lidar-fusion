@@ -398,9 +398,6 @@ class Parser():
                                                    drop_last=True)
     assert len(self.trainloader) > 0
     self.trainiter = iter(self.trainloader)
-
-    
-    self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=False,

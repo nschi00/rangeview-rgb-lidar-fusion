@@ -25,6 +25,8 @@ class BasicConv2d(nn.Module):
             self.relu = nn.LeakyReLU()
 
     def forward(self, x):
+        if type(x) == tuple or type(x) == list:
+            x = torch.cat(x, dim=1)
         x = self.conv(x)
         x = self.bn(x)
         if self.relu:
