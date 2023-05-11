@@ -545,10 +545,7 @@ class Trainer():
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
-                if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    output = self.model(in_vol, rgb_data)
-                else:
-                    output = self.model(in_vol)
+                output = self.model(in_vol, rgb_data)
 
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
