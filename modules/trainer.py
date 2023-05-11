@@ -537,7 +537,7 @@ class Trainer():
         with torch.no_grad():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
-                in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _ = proj_data
+                in_vol, proj_mask, proj_labels = proj_data[0:3]
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
