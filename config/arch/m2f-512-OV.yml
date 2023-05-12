@@ -1,0 +1,138 @@
+################################################################################
+# training parameters
+################################################################################
+train:
+  pipeline: "m2f" #  "res" "m2f" "hard"
+  act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
+  loss: "xentropy" #   must be either xentropy or iou
+  aux_loss: True
+  overfit: True
+  share_subset_train: 1  # share of data used for training; overfit has to be false
+  lamda: 1.0
+  scheduler: "cosine" # "cosine" or "decay"
+  max_epochs: 5000
+  cosine:
+    min_lr: 0.00005
+    max_lr: 0.01
+    first_cycle: 50
+    cycle: 1
+    wup_epochs: 20
+    gamma: 0.95
+  decay:
+    lr: 0.01
+    wup_epochs: 1 # warmup during first XX epochs (can be float)
+    lr_decay: 0.99 # learning rate decay per epoch after initial cycle (from min lr)
+  momentum: 0.9 # sgd momentum
+  w_decay: 0.0001 # weight decay
+  batch_size: 6 # batch size
+  report_batch: 10 # every x batches, report loss
+  report_epoch: 500000 # every x epochs, report validation set
+  epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)
+  save_summary: False # Summary of weight histograms for tensorboard   Must false since not check the api
+  save_scans: False # False doesn't save anything, True saves som
+  show_scans: True # show scans during training
+  save_batch: 50
+  workers: 2 # number of threads to get data
+  #TODO: Change it back to 4
+
+################################################################################
+# fusion parameters
+################################################################################
+
+
+fusion: # only relevant if pipeline == "fusion"
+  use_att: False # whether to use cross-encoder or convolution for fusion
+  fuse_all: "main_late" # "all_early", "all_late", "main_early" or "main_late"
+  branch_type: "semantic" # "semantic", "instance" or "panoptic"
+  name_backbone: "resnet50" # "resnet50" or "mask2former"
+  stage: "combination" # "enc", "pixel_decoder", "combination"
+  lr: 0.0002 # learning rate for cross attention fusion
+  w_decay: 0
+  scheduler_gamma: 0.5
+  scheduler_milestones: [400, 700, 1000, 1500, 2000] # Currently for overfitting
+
+m2f:
+  SOLVER:
+    BASE_LR: 0.0001
+    MAX_ITER: 90000
+    WARMUP_FACTOR: 1.0
+    WARMUP_ITERS: 0
+    WEIGHT_DECAY: 0.05
+    OPTIMIZER: "ADAMW"
+    LR_SCHEDULER_NAME: "WarmupPolyLR"
+    BACKBONE_MULTIPLIER: 0.1
+    WEIGHT_DECAY_NORM: 0.0
+    WEIGHT_DECAY_EMBED: 0.0
+    POLY_LR_POWER: 0.9
+    POLY_LR_CONSTANT_ENDING: 0.0
+    WARMUP_METHOD: "linear"
+    CLIP_GRADIENTS:
+      ENABLED: True
+      CLIP_TYPE: "full_model"
+      CLIP_VALUE: 0.01
+      NORM_TYPE: 2.0
+    AMP:
+      ENABLED: True
+
+################################################################################
+# postproc parameters
+################################################################################
+post:
+  KNN:
+    use: True # This parameter default is false
+    #     params:
+    #       knn: 5
+    #       search: 5
+    #       sigma: 1.0
+    #       cutoff: 1.0
+    params:
+      knn: 7
+      search: 7
+      sigma: 1.0
+      cutoff: 2.0
+
+################################################################################
+# dataset (to find parser)
+################################################################################
+dataset:
+  labels: "kitti"
+  scans: "kitti"
+  max_points: 150000 # max of any scan in dataset
+  sensor:
+    name: "HDL64"
+    type: "spherical" # projective
+    fov_up: 3
+    fov_down: -25
+    img_prop:
+      width: 512
+      height: 64
+    img_means: #range,x,y,z,signal
+      - 11.71279
+      - -0.1023471
+      - 0.4952
+      - -1.0545
+      - 0.2877
+    img_stds: #range,x,y,z,signal
+      - 10.24
+      - 12.295865
+      - 9.4287
+      - 0.8643
+      - 0.1450
+#     img_means: #range,x,y,z,signal
+#       - 11.71279
+#       - -0.1023471
+#       - 0.4952
+#       - -1.0545
+#       - 0.2877
+#       - 0.0035755096
+#       - 0.39993516
+#       - -0.0023758996
+#     img_stds: #range,x,y,z,signal
+#       - 10.24
+#       - 12.295865
+#       - 9.4287
+#       - 0.8643
+#       - 0.1450
+#       - 0.44721574
+#       - 0.568866
+#       - 0.46991134

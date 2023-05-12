@@ -1,154 +1,174 @@
-import requests
-import torch
-from PIL import Image
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation, Mask2FormerConfig, Mask2FormerModel
+from transformers.models.mask2former.modeling_mask2former import \
+    Mask2FormerConfig,\
+    Mask2FormerSinePositionEmbedding,\
+    Mask2FormerMaskedAttentionDecoderOutput, \
+    Mask2FormerMaskedAttentionDecoder
+from ResNet import BasicBlock, ResNet_34
+import torch.nn.functional as F
 import torch.nn as nn
 import torch
-from torch.nn import functional as F
-import numpy as np
+import sys
+import os
+from typing import List
+from torch import Tensor
+sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
+sys.path.append(os.getcwd())
 
 
-# load Mask2Former fine-tuned on Cityscapes instance segmentation
-processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-small-cityscapes-instance")
-model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-small-cityscapes-instance")
+class Mask2FormerBasePrototype(nn.Module):
+    """
+    All scale fusion with resnet50 backbone
+    Basic fusion with torch.cat + conv1x1
+    use_att: use cross attention or not
+    fusion_scale: "all_early" or "all_late" or "main_late" or "main_early"
+    name_backbone: backbone for RGB, only "resnet50" at the moment possible
+    branch_type: semantic, instance or panoptic
+    stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
+    """
 
-url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-image = Image.open(requests.get(url, stream=True).raw)
-inputs = processor(images=image, return_tensors="pt")
+    def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
+                 norm_layer=None, groups=1, width_per_group=64,
+                 backbone_3d_ptr="best_pretrained/CENet_64x512_67_6", freeze_bb=True):
+        super(Mask2FormerBasePrototype, self).__init__()
 
-with torch.no_grad():
-    outputs = model(**inputs)
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        self.backbone_3d = ResNet_34(nclasses, aux, block,
+                                     layers, if_BN,
+                                     width_per_group=width_per_group,
+                                     groups=groups)
 
-## INPUT SIZE = 1x5x64x512 (1024 or 2048)
+        if backbone_3d_ptr is not None:
+            w_dict = torch.load(
+                backbone_3d_ptr, map_location=lambda storage, loc: storage)
+            self.backbone_3d.load_state_dict(w_dict['state_dict'], strict=True)
 
-class ExtractFeatureBlock(nn.Module):
-    def __init__(self) -> None:
+        if freeze_bb:
+            for param in self.backbone_3d.parameters():
+                param.requires_grad = False
+
+        # config = Mask2FormerConfig()
+        config = Mask2FormerConfig.from_pretrained(
+            "facebook/mask2former-swin-tiny-cityscapes-semantic")
+
+        config.decoder_layers = 4
+        config.feature_size = 128
+        config.ignore_value = 0
+        config.mask_feature_size = 128
+        config.num_labels = nclasses
+
+        self.decoder = Mask2FormerTransformerModule(
+            config.feature_size, config)
+        
+        self.class_predictor = nn.Linear(256, config.num_labels)
+
+    def forward(self, x, _):
+        # * get RGB features
+        x = self.backbone_3d.feature_extractor(x)
+
+        out = self.decoder(multi_scale_features=x[1:],
+                           mask_features=x[0],
+                           output_hidden_states=True,
+                           output_attentions=False)
+
+        class_queries_logits = ()
+
+        for decoder_output in out.intermediate_hidden_states:
+            class_prediction = self.class_predictor(decoder_output.transpose(0, 1))
+            class_queries_logits += (class_prediction,)
+
+        masks_queries_logits = out.masks_queries_logits
+        outputs = []
+        for i in range(len(masks_queries_logits)):
+            masks_classes = class_queries_logits[-i]
+            # [batch_size, num_queries, height, width]
+            masks_probs = masks_queries_logits[-i]
+            # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
+            out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
+            outputs.append(out)
+
+        return outputs
+
+class Mask2FormerTransformerModule(nn.Module):
+    """
+    The Mask2Former's transformer module.
+    """
+
+    def __init__(self, in_features: int, config: Mask2FormerConfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(5, 3, kernel_size=1, padding=0)
-        self.conv2 = nn.Conv2d(5, 3, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(5, 3, kernel_size=5, padding=2)
-        self.last_conv = nn.Conv2d(9, 3, kernel_size=1, padding=0)
-        self.batchnorm = nn.BatchNorm2d(3)
-        self.activation = nn.Sigmoid()
+        hidden_dim = config.hidden_dim
+        self.num_feature_levels = 3
+        self.position_embedder = Mask2FormerSinePositionEmbedding(
+            num_pos_feats=hidden_dim // 2, normalize=True)
+        self.queries_embedder = nn.Embedding(config.num_queries, hidden_dim)
+        self.queries_features = nn.Embedding(config.num_queries, hidden_dim)
+        self.input_projections = []
 
-    def forward(self, x):
-        x1, x2, x3 = self.conv1(x), self.conv2(x), self.conv3(x)
-        x1, x2, x3 = self.batchnorm(x1), self.batchnorm(x2), self.batchnorm(x3)
-        x1, x2, x3 = self.activation(x1), self.activation(x2), self.activation(x3)
-        x = torch.cat([x1, x2, x3], dim=1)
-        x = self.last_conv(x)
-        x = self.batchnorm(x)
-        x = self.activation(x)
-        return x
+        for _ in range(self.num_feature_levels):
+            if in_features != hidden_dim or config.enforce_input_projection:
+                self.input_projections.append(
+                    nn.Conv2d(in_features, hidden_dim, kernel_size=1))
+            else:
+                self.input_projections.append(nn.Sequential())
 
+        self.input_projections = nn.ModuleList(self.input_projections)
+        self.decoder = Mask2FormerMaskedAttentionDecoder(config=config)
+        self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
 
+    def forward(
+        self,
+        multi_scale_features: List[Tensor],
+        mask_features: Tensor,
+        output_hidden_states: bool = False,
+        output_attentions: bool = False,
+    ) -> Mask2FormerMaskedAttentionDecoderOutput:
+        multi_stage_features = []
+        multi_stage_positional_embeddings = []
+        size_list = []
 
-class Mask2FormerAdaptive(nn.Module):
-    def __init__(self, nclasses, aux):
-        super(Mask2FormerAdaptive, self).__init__()
-        self.aux = aux
-        self.nclasses = nclasses
-        self.feature_extractor = ExtractFeatureBlock()
-        self.configuration = Mask2FormerConfig().from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
-        self.configuration.num_labels = self.nclasses
-        self.configuration.ignore_value = 0
-        self.configuration.id2label ={0:"unlabeled",
-                                    1:"car",
-                                    2:"bicycle",
-                                    3:"motorcycle",
-                                    4:"truck",
-                                    5:"other-vehicle",
-                                    6:"person",
-                                    7:"bicyclist",
-                                    8:"motorcyclist",
-                                    9:"road",
-                                    10:"parking",
-                                    11:"sidewalk",
-                                    12:"other-ground",
-                                    13:"building",
-                                    14:"fence",
-                                    15:"vegetation",
-                                    16:"trunk",
-                                    17:"terrain",
-                                    18:"pole",
-                                    19:"traffic-sign"}
-        
-        self.configuration.label2id ={
-                                        "unlabeled": 0,
-                                        "car": 1,
-                                        "bicycle": 2,
-                                        "motorcycle": 3,
-                                        "truck": 4,
-                                        "other-vehicle": 5,
-                                        "person": 6,
-                                        "bicyclist": 7,
-                                        "motorcyclist": 8,
-                                        "road": 9,
-                                        "parking": 10,
-                                        "sidewalk": 11,
-                                        "other-ground": 12,
-                                        "building": 13,
-                                        "fence": 14,
-                                        "vegetation": 15,
-                                        "trunk": 16,
-                                        "terrain": 17,
-                                        "pole": 18,
-                                        "traffic-sign": 19
-                                    }
+        for i in range(self.num_feature_levels):
+            size_list.append(multi_scale_features[i].shape[-2:])
+            multi_stage_positional_embeddings.append(
+                self.position_embedder(multi_scale_features[i], None).flatten(2))
+            multi_stage_features.append(
+                self.input_projections[i](multi_scale_features[i]).flatten(2)
+                + self.level_embed.weight[i][None, :, None]
+            )
 
-        self.processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
-        self.model = Mask2FormerForUniversalSegmentation(self.configuration)
-        config = self.model.config
+            # Flatten (batch_size, num_channels, height, width) -> (height*width, batch_size, num_channels)
+            multi_stage_positional_embeddings[-1] = multi_stage_positional_embeddings[-1].permute(
+                2, 0, 1)
+            multi_stage_features[-1] = multi_stage_features[-1].permute(
+                2, 0, 1)
 
-        print(config)
+        _, batch_size, _ = multi_stage_features[0].shape
 
-    def forward(self, x, rgb):
-        x = self.feature_extractor(x)
-        x = list(x)
-        input_mask2former = self.processor(images=x, return_tensors="pt")
-        input_mask2former.data['pixel_values'] = input_mask2former.data['pixel_values'].cuda()
-        input_mask2former.data['pixel_mask'] = input_mask2former.data['pixel_mask'].cuda()
+        # [num_queries, batch_size, num_channels]
+        query_embeddings = self.queries_embedder.weight.unsqueeze(
+            1).repeat(1, batch_size, 1)
+        query_features = self.queries_features.weight.unsqueeze(
+            1).repeat(1, batch_size, 1)
 
-        output_mask2former = self.model(**input_mask2former)
+        decoder_output = self.decoder(
+            inputs_embeds=query_features,
+            multi_stage_positional_embeddings=multi_stage_positional_embeddings,
+            pixel_embeddings=mask_features,
+            encoder_hidden_states=multi_stage_features,
+            query_position_embeddings=query_embeddings,
+            feature_size_list=size_list,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+            return_dict=True,
+        )
 
-        class_queries_logits = output_mask2former["class_queries_logits"]
-        masks_queries_logits = output_mask2former["masks_queries_logits"]
+        return decoder_output
 
-        masks_classes = class_queries_logits.softmax(dim=-1)[..., :-1]
-        masks_probs = masks_queries_logits.sigmoid()  # [batch_size, num_queries, height, width]
-
-        # Semantic segmentation logits of shape (batch_size, num_classes, height, width)
-        segmentation = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
-        batch_size = class_queries_logits.shape[0]
-        
-        target_sizes = []
-        for image in x:
-            target_sizes.append(image.shape[1::])
-        # Resize logits and compute semantic segmentation maps
-        if target_sizes is not None:
-            if batch_size != len(target_sizes):
-                raise ValueError(
-                    "Make sure that you pass in as many target sizes as the batch dimension of the logits"
-                )
-
-            semantic_segmentation = []
-            for idx in range(batch_size):
-                resized_logits = torch.nn.functional.interpolate(
-                    segmentation[idx].unsqueeze(dim=0), size=target_sizes[idx], mode="bilinear", align_corners=False
-                )
-                semantic_map = F.softmax(resized_logits[0],dim=0)
-                semantic_segmentation.append(semantic_map)
-        else:
-            semantic_segmentation = segmentation.argmax(dim=1)
-            semantic_segmentation = [semantic_segmentation[i] for i in range(semantic_segmentation.shape[0])]
-
-        temp = torch.stack(semantic_segmentation)
-        return temp
 
 if __name__ == "__main__":
     import time
-    model = Mask2FormerAdaptive(20, aux = False).cuda()
-    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model = Mask2FormerBasePrototype(20).cuda()
+    pytorch_total_params = sum(p.numel()
+                               for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []
     for i in range(20):
@@ -156,11 +176,11 @@ if __name__ == "__main__":
         input_rgb = torch.randn(2, 3, 452, 1032).cuda()
         model.eval()
         with torch.no_grad():
-          start_time = time.time()
-          outputs = model(input_3D, input_rgb)
+            start_time = time.time()
+            outputs = model(input_3D, input_rgb)
         torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
         fwt = time.time() - start_time
         time_train.append(fwt)
-        print ("Forward time per img: %.3f (Mean: %.3f)" % (
-          fwt / 1, sum(time_train) / len(time_train) / 1))
+        print("Forward time per img: %.3f (Mean: %.3f)" % (
+            fwt / 1, sum(time_train) / len(time_train) / 1))
         time.sleep(0.15)

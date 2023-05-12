@@ -2,19 +2,19 @@
 # training parameters
 ################################################################################
 train:
-  pipeline: "res"       #  "res" "fid" "hard"
+  pipeline: "m2f"       #  "res" "m2f" "hard"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
   aux_loss: True
-  overfit: True
-  share_subset_train: 1  # share of data used for training; overfit has to be false
+  overfit: False
+  share_subset_train: 0.25  # share of data used for training; overfit has to be false
   lamda: 1.0
-  scheduler: "cosine"  # "cosine" or "decay"
-  max_epochs: 5000
-  cosine:
+  scheduler: "consine"  # "consine" or "decay"
+  max_epochs: 100
+  consine:
     min_lr: 0.0001
     max_lr: 0.01
-    first_cycle: 150
+    first_cycle: 50
     cycle: 1
     wup_epochs: 20
     gamma: 0.95
@@ -24,15 +24,15 @@ train:
     lr_decay: 0.99       # learning rate decay per epoch after initial cycle (from min lr)
   momentum: 0.9          # sgd momentum
   w_decay: 0.0001        # weight decay
-  batch_size: 6         # batch size
+  batch_size: 10          # batch size
   report_batch: 100      # every x batches, report loss
-  report_epoch: 100000        # every x epochs, report validation set
+  report_epoch: 1        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
   save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api
   save_scans:  False     # False doesn't save anything, True saves som
   show_scans: True       # show scans during training
   save_batch: 50
-  workers: 0            # number of threads to get data 
+  workers: 2            # number of threads to get data 
   #TODO: Change it back to 4
 
 ################################################################################
@@ -40,9 +40,9 @@ train:
 ################################################################################
 fusion:                         # only relevant if pipeline == "fusion"
   use_att: False                # whether to use cross-encoder or convolution for fusion
-  fuse_all: "main_early"        # "all", "main_early" or "main_late"
+  fuse_all: "all_late"        # "all", "main_early" or "main_late"
   branch_type: "panoptic"       # "semantic", "instance" or "panoptic"
-  name_backbone: "resnet50"     # "resnet50" or "mask2former"
+  name_backbone: "mask2former"     # "resnet50" or "mask2former"
   stage: "combination"          # "enc", "pixel_decoder", "combination"
 
 ################################################################################

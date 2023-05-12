@@ -1,12 +1,17 @@
 import requests
 import torch
 from PIL import Image
-from transformers import AutoImageProcessor, Mask2FormerModel
+from transformers import AutoImageProcessor, Mask2FormerModel, Mask2FormerConfig
+from transformers.models.mask2former.modeling_mask2former import Mask2FormerTransformerModule, Mask2FormerMaskedAttentionDecoder
+from third_party.Mask2Former.mask2former.modeling.criterion import SetCriterion, HungarianMatcher
+
+
 
 
 # load Mask2Former fine-tuned on Cityscapes semantic segmentation
 processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
 model = Mask2FormerModel.from_pretrained("facebook/mask2former-swin-tiny-cityscapes-semantic")
+config = model.config
 model = model.pixel_level_module
 
 url = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -24,3 +29,6 @@ masks_queries_logits = outputs.masks_queries_logits
 # you can pass them to processor for postprocessing
 predicted_semantic_map = processor.post_process_semantic_segmentation(outputs, target_sizes=[image.size[::-1]])[0]
 # we refer to the demo notebooks for visualization (see "Resources" section in the Mask2Former docs)
+
+
+

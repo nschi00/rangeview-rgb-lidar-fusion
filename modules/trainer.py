@@ -21,6 +21,7 @@ from modules.network.ResNet import ResNet_34
 from modules.network.Fusion import Fusion
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
+from collections import defaultdict
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -104,7 +105,7 @@ class Trainer():
             if self.ARCH["train"]["pipeline"] == "res":
                 self.model = ResNet_34(self.parser.get_n_classes(),
                                        self.ARCH["train"]["aux_loss"])
-
+                F_config = defaultdict(lambda: None)
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 F_config = ARCH["fusion"]
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
@@ -125,16 +126,17 @@ class Trainer():
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
-        print("{}_{}_{}_{}". format(F_config["name_backbone"],
-                                    "ca" if F_config["use_att"] else "conv",
-                                    F_config["fuse_all"],
+        if F_config["name"]:
+            print("{}_{}_{}_{}". format(F_config["name_backbone"],
+                                        "ca" if F_config["use_att"] else "conv",
+                                        F_config["fuse_all"],
 
-                                    "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        if F_config["name_backbone"] == "mask2former":
-            print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
+                                        "" if self.ARCH["train"]["aux_loss"] else "noaux"))
+            if F_config["name_backbone"] == "mask2former":
+                print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
 
-        print("Please verify your settings before continue.")
-        time.sleep(7)
+            print("Please verify your settings before continue.")
+            time.sleep(7)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -186,6 +188,8 @@ class Trainer():
         momentum = self.ARCH["train"]["momentum"]
 
         # * Create Adam optimizer for cross attention fusion module
+        self.att_optimizer = None
+        self.att_scheduler = None
         if F_config["use_att"]:
             fusion_params = self.model.fusion_layer.parameters()
             rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
@@ -199,8 +203,6 @@ class Trainer():
                                                                 gamma=F_config["scheduler_gamma"])
 
         else:
-            self.att_optimizer = None
-            self.att_scheduler = None
             rest_params = self.model.parameters()
 
         self.optimizer = optim.SGD(rest_params,
@@ -227,8 +229,15 @@ class Trainer():
 
         if self.path is not None:
             torch.nn.Module.dump_patches = True
-            w_dict = torch.load(path + "/SENet_valid_best",
-                                map_location=lambda storage, loc: storage)
+            assert "fusion" not in self.ARCH["train"]["pipeline"], "no pretrained for fusion"
+            try:
+                w_dict = torch.load(path + "/SENet_valid_best",
+                                    map_location=lambda storage, loc: storage)
+            except:
+                w_dict = torch.load(path,
+                                    map_location=lambda storage, loc: storage)
+            else:
+                print("Loading model from: {}".format(path))
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
 #             self.optimizer.load_state_dict(w_dict['optimizer'])
 #             self.epoch = w_dict['epoch'] + 1
@@ -327,15 +336,14 @@ class Trainer():
             self.info["train_acc"] = acc
             self.info["train_iou"] = iou
             self.info["lr"] = self.optimizer.param_groups[0]["lr"]
-            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else None
+            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else np.nan
 
             # remember best iou and save checkpoint
+            # TODO: save attention optim and scheduler if necessary
             state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                      'optimizer': self.optimizer.state_dict(),
                      'info': self.info,
-                     'scheduler': self.scheduler.state_dict(),
-                     'att_optimizer': self.att_optimizer.state_dict() if self.att_optimizer is not None else None,
-                     'att_scheduler': self.att_scheduler.state_dict() if self.att_scheduler is not None else None
+                     'scheduler': self.scheduler.state_dict()
                      }
             save_checkpoint(state, self.log, suffix="_latest")
 
@@ -464,9 +472,13 @@ class Trainer():
             self.batch_time_t.update(time.time() - end)
             end = time.time()
             lr = self.optimizer.param_groups[0]["lr"]
-            att_lr = self.att_optimizer.param_groups[0]["lr"]
             learning_rate.update(lr, 1)
-            attention_lr.update(att_lr, 1)
+
+            if self.att_optimizer is not None:
+                att_lr = self.att_optimizer.param_groups[0]["lr"]
+                attention_lr.update(att_lr, 1)
+            else:
+                att_lr = np.nan
 
             if show_scans:
                 if i % self.ARCH["train"]["save_batch"] == 0:
@@ -581,7 +593,7 @@ class Trainer():
                 end = time.time()
 
             accuracy = evaluator.getacc()
-            jaccard, class_jaccard = evaluator.getIoUMissingClass()
+            jaccard, class_jaccard = evaluator.getIoU()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 
