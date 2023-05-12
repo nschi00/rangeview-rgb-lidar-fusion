@@ -511,19 +511,18 @@ class Trainer():
                           data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
                           att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
 
-                message = 'Lr: {lr:.3e} | '
-                'Att_lr: {att_lr:.0e} |'
-                'Epoch: [{0}][{1}/{2}] | '
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
-                'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
-                'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
-                'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
-                'acc {acc.val:.3f} ({acc.avg:.3f}) | '
-                'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
-                    epoch, i, len(train_loader), batch_time=self.batch_time_t,
-                    data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
-                    att_lr=att_lr, estim=self.calculate_estimate(epoch, i))
-                save_to_log(self.log, 'log.txt', message)
+                save_to_log(self.log, 'log.txt', 'Lr: {lr:.3e} | '
+                            'Att_lr: {att_lr:.0e} |'
+                            'Epoch: [{0}][{1}/{2}] | '
+                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
+                            'Data {data_time.val:.3f} ({data_time.avg:.3f}) | '
+                            'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
+                            'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
+                            'acc {acc.val:.3f} ({acc.avg:.3f}) | '
+                            'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
+                                epoch, i, len(train_loader), batch_time=self.batch_time_t,
+                                data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
+                                att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
 
             # * step scheduler
             self.scheduler.step()

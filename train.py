@@ -64,7 +64,7 @@ if __name__ == '__main__':
         '--pretrained', '-p',
         type=str,
         required=False,
-        default="best_pretrained/CENet_64x512_67_6",
+        default=None,
         help='Directory to get the pretrained model. If not passed, do from scratch!'
     )
 
