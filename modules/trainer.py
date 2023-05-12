@@ -188,6 +188,8 @@ class Trainer():
         momentum = self.ARCH["train"]["momentum"]
 
         # * Create Adam optimizer for cross attention fusion module
+        self.att_optimizer = None
+        self.att_scheduler = None
         if F_config["use_att"]:
             fusion_params = self.model.fusion_layer.parameters()
             rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
@@ -201,8 +203,6 @@ class Trainer():
                                                                 gamma=F_config["scheduler_gamma"])
 
         else:
-            self.att_optimizer = None
-            self.att_scheduler = None
             rest_params = self.model.parameters()
 
         self.optimizer = optim.SGD(rest_params,
@@ -336,15 +336,14 @@ class Trainer():
             self.info["train_acc"] = acc
             self.info["train_iou"] = iou
             self.info["lr"] = self.optimizer.param_groups[0]["lr"]
-            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else None
+            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else np.nan
 
             # remember best iou and save checkpoint
+            # TODO: save attention optim and scheduler if necessary
             state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                      'optimizer': self.optimizer.state_dict(),
                      'info': self.info,
-                     'scheduler': self.scheduler.state_dict(),
-                     'att_optimizer': self.att_optimizer.state_dict() if self.att_optimizer is not None else None,
-                     'att_scheduler': self.att_scheduler.state_dict() if self.att_scheduler is not None else None
+                     'scheduler': self.scheduler.state_dict()
                      }
             save_checkpoint(state, self.log, suffix="_latest")
 
@@ -473,9 +472,13 @@ class Trainer():
             self.batch_time_t.update(time.time() - end)
             end = time.time()
             lr = self.optimizer.param_groups[0]["lr"]
-            att_lr = self.att_optimizer.param_groups[0]["lr"]
             learning_rate.update(lr, 1)
-            attention_lr.update(att_lr, 1)
+
+            if self.att_optimizer is not None:
+                att_lr = self.att_optimizer.param_groups[0]["lr"]
+                attention_lr.update(att_lr, 1)
+            else:
+                att_lr = np.nan
 
             if show_scans:
                 if i % self.ARCH["train"]["save_batch"] == 0:
