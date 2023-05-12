@@ -190,6 +190,26 @@ class ResNet_34(nn.Module):
         else:
             return out
 
+    def feature_extractor(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+
+        x_1 = self.layer1(x)  # 1
+        x_2 = self.layer2(x_1)  # 1/2
+        x_3 = self.layer3(x_2)  # 1/4
+        x_4 = self.layer4(x_3)  # 1/8
+
+        res_2 = F.interpolate(x_2, size=x.size()[2:], mode='bilinear', align_corners=True)
+        res_3 = F.interpolate(x_3, size=x.size()[2:], mode='bilinear', align_corners=True)
+        res_4 = F.interpolate(x_4, size=x.size()[2:], mode='bilinear', align_corners=True)
+        res = [x, x_1, res_2, res_3, res_4]
+
+        out = torch.cat(res, dim=1)
+        out = self.conv_1(out)
+        out = self.conv_2(out)
+
+        return [out, x_2, x_3, x_4]
 
 if __name__ == "__main__":
     import time
