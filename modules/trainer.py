@@ -82,7 +82,8 @@ class Trainer():
                              workers=self.ARCH["train"]["workers"],
                              gt=True,
                              shuffle_train=True,
-                             overfit=self.ARCH["train"]["overfit"])
+                             overfit=self.ARCH["train"]["overfit"],
+                             share_subset_train=self.ARCH["train"]["share_subset_train"])
 
         # weights for loss (and bias)
 
@@ -126,7 +127,7 @@ class Trainer():
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
-        if F_config["name"]:
+        if F_config["name_backbone"]:
             print("{}_{}_{}_{}". format(F_config["name_backbone"],
                                         "ca" if F_config["use_att"] else "conv",
                                         F_config["fuse_all"],

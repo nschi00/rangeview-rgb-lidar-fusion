@@ -333,7 +333,7 @@ class Parser():
                workers,           # threads to load data
                gt=True,           # get gt?
                shuffle_train=True,
-               overfit = False,
+               overfit=False,
                share_subset_train=1.0):  # shuffle training set?
     super(Parser, self).__init__()
 
