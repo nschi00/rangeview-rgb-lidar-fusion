@@ -9,3 +9,4 @@ __pycache__/
 !logs/overfit_base
 .vscode/launch.json
 third_party/*
+best_pretrained/*

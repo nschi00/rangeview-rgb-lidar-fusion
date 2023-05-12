@@ -21,6 +21,7 @@ from modules.network.ResNet import ResNet_34
 from modules.network.Fusion import Fusion
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
+from collections import defaultdict
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -104,7 +105,7 @@ class Trainer():
             if self.ARCH["train"]["pipeline"] == "res":
                 self.model = ResNet_34(self.parser.get_n_classes(),
                                        self.ARCH["train"]["aux_loss"])
-
+                F_config = defaultdict(lambda: None)
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 F_config = ARCH["fusion"]
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
@@ -125,16 +126,17 @@ class Trainer():
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
-        print("{}_{}_{}_{}". format(F_config["name_backbone"],
-                                    "ca" if F_config["use_att"] else "conv",
-                                    F_config["fuse_all"],
+        if F_config["name"]:
+            print("{}_{}_{}_{}". format(F_config["name_backbone"],
+                                        "ca" if F_config["use_att"] else "conv",
+                                        F_config["fuse_all"],
 
-                                    "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        if F_config["name_backbone"] == "mask2former":
-            print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
+                                        "" if self.ARCH["train"]["aux_loss"] else "noaux"))
+            if F_config["name_backbone"] == "mask2former":
+                print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
 
-        print("Please verify your settings before continue.")
-        time.sleep(7)
+            print("Please verify your settings before continue.")
+            time.sleep(7)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -227,8 +229,15 @@ class Trainer():
 
         if self.path is not None:
             torch.nn.Module.dump_patches = True
-            w_dict = torch.load(path + "/SENet_valid_best",
-                                map_location=lambda storage, loc: storage)
+            assert "fusion" not in self.ARCH["train"]["pipeline"], "no pretrained for fusion"
+            try:
+                w_dict = torch.load(path + "/SENet_valid_best",
+                                    map_location=lambda storage, loc: storage)
+            except:
+                w_dict = torch.load(path,
+                                    map_location=lambda storage, loc: storage)
+            else:
+                print("Loading model from: {}".format(path))
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
 #             self.optimizer.load_state_dict(w_dict['optimizer'])
 #             self.epoch = w_dict['epoch'] + 1
@@ -581,7 +590,7 @@ class Trainer():
                 end = time.time()
 
             accuracy = evaluator.getacc()
-            jaccard, class_jaccard = evaluator.getIoUMissingClass()
+            jaccard, class_jaccard = evaluator.getIoU()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 

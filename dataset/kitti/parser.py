@@ -404,8 +404,10 @@ class Parser():
                                                    drop_last=True)
     assert len(self.trainloader) > 0
     self.trainiter = iter(self.trainloader)
+    val_batch_size = 12 if self.batch_size < 12 else self.batch_size
+      
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
-                                                   batch_size=self.batch_size,
+                                                   batch_size=val_batch_size,
                                                    shuffle=False,
                                                    num_workers=self.workers,
                                                    drop_last=True)
