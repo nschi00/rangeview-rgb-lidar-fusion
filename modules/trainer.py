@@ -19,6 +19,7 @@ from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
 from modules.network.Fusion import Fusion
+from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
 from collections import defaultdict
@@ -100,12 +101,15 @@ class Trainer():
                 # don't weigh
                 self.loss_w[x_cl] = 0
         print("Loss weights from content: ", self.loss_w.data)
-
+        F_config = defaultdict(lambda: None)
         with torch.no_grad():
             if self.ARCH["train"]["pipeline"] == "res":
                 self.model = ResNet_34(self.parser.get_n_classes(),
                                        self.ARCH["train"]["aux_loss"])
-                F_config = defaultdict(lambda: None)
+                if self.ARCH["train"]["act"] == "Hardswish":
+                    convert_relu_to_softplus(self.model, nn.Hardswish())
+                elif self.ARCH["train"]["act"] == "SiLU":
+                    convert_relu_to_softplus(self.model, nn.SiLU())
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 F_config = ARCH["fusion"]
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
@@ -115,18 +119,20 @@ class Trainer():
                                     name_backbone=F_config["name_backbone"],
                                     branch_type=F_config["branch_type"],
                                     stage=F_config["stage"])
-
-            if self.ARCH["train"]["act"] == "Hardswish":
-                convert_relu_to_softplus(self.model, nn.Hardswish())
-            elif self.ARCH["train"]["act"] == "SiLU":
-                convert_relu_to_softplus(self.model, nn.SiLU())
+                if self.ARCH["train"]["act"] == "Hardswish":
+                    convert_relu_to_softplus(self.model, nn.Hardswish())
+                elif self.ARCH["train"]["act"] == "SiLU":
+                    convert_relu_to_softplus(self.model, nn.SiLU())
+            else:
+                self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
+                                                      aux=self.ARCH["train"]["aux_loss"])
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
-        if F_config["name"]:
+        if F_config["name_backbone"]:
             print("{}_{}_{}_{}". format(F_config["name_backbone"],
                                         "ca" if F_config["use_att"] else "conv",
                                         F_config["fuse_all"],
@@ -205,10 +211,16 @@ class Trainer():
         else:
             rest_params = self.model.parameters()
 
-        self.optimizer = optim.SGD(rest_params,
-                                   lr=lr,  # min_lr
-                                   momentum=momentum,
-                                   weight_decay=self.ARCH["train"]["w_decay"])
+        if ARCH["train"]["pipeline"] == "m2f":
+            lr = ARCH["train"]["adamw"]["lr"]
+            w_decay = ARCH["train"]["w_decay"]
+            self.clip_grad = ARCH["train"]["adamw"]["clip_grad"]
+            self.optimizer = optim.AdamW(rest_params, lr=lr, weight_decay=w_decay)
+        else:
+            self.optimizer = optim.SGD(rest_params,
+                                       lr=lr,  # min_lr
+                                       momentum=momentum,
+                                       weight_decay=self.ARCH["train"]["w_decay"])
 
         if scheduler_type == "cosine":
             self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
@@ -447,6 +459,8 @@ class Trainer():
             self.optimizer.zero_grad()
             self.att_optimizer.zero_grad() if self.att_optimizer is not None else None
             scaler.scale(loss_m.sum()).backward()
+            # if self.clip_grad is not None or self.clip_grad == 0:
+            #     torch.nn.utils.clip_grad_norm(self.model.parameters(), self.clip_grad)
             scaler.step(self.optimizer)
             scaler.step(self.att_optimizer) if self.att_optimizer is not None else None
             scaler.update()
@@ -559,7 +573,7 @@ class Trainer():
                 # compute output
                 output = self.model(in_vol, rgb_data)
 
-                if self.ARCH["train"]["aux_loss"]:
+                if type(output) is list:
                     output = output[0]
 
                 log_out = torch.log(output.clamp(min=1e-8))
