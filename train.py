@@ -38,7 +38,7 @@ if __name__ == '__main__':
         '--arch_cfg', '-ac',
         type=str,
         required=False,
-        default='config/arch/senet-512.yml',
+        default='config/arch/m2f-512-OV.yml',
         help='Architecture yaml cfg file. See /config/arch for sample. No default!',
     )
     parser.add_argument(
@@ -64,7 +64,7 @@ if __name__ == '__main__':
         '--pretrained', '-p',
         type=str,
         required=False,
-        default="best_pretrained/CENet_64x512_67_6",
+        default=None,
         help='Directory to get the pretrained model. If not passed, do from scratch!'
     )
 

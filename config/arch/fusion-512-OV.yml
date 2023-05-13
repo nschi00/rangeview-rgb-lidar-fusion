@@ -32,7 +32,7 @@ train:
   save_scans: False # False doesn't save anything, True saves som
   show_scans: True # show scans during training
   save_batch: 50
-  workers: 2 # number of threads to get data
+  workers: 0 # number of threads to get data
   #TODO: Change it back to 4
 
 ################################################################################

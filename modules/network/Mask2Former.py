@@ -1,19 +1,23 @@
-from transformers.models.mask2former.modeling_mask2former import \
-    Mask2FormerConfig,\
-    Mask2FormerSinePositionEmbedding,\
-    Mask2FormerMaskedAttentionDecoderOutput, \
-    Mask2FormerMaskedAttentionDecoder
-from ResNet import BasicBlock, ResNet_34
+import sys
+import os
+sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
+sys.path.append(os.path.join(os.getcwd(), 'third_party', 'Mask2Former'))
+sys.path.append(os.getcwd())
+
+import warnings
+warnings.simplefilter("ignore", UserWarning)
+
+
+from ResNet import BasicConv2d, ResNet_34, BasicBlock
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
-import sys
-import os
+from detectron2.config import get_cfg
 from typing import List
 from torch import Tensor
-sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
-sys.path.append(os.getcwd())
-
+from third_party.Mask2Former.mask2former.modeling.transformer_decoder import MultiScaleMaskedTransformerDecoder
+from third_party.Mask2Former.mask2former import config as m2f_config
+from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 
 class Mask2FormerBasePrototype(nn.Module):
     """
@@ -28,7 +32,10 @@ class Mask2FormerBasePrototype(nn.Module):
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64,
-                 backbone_3d_ptr="best_pretrained/CENet_64x512_67_6", freeze_bb=True):
+                 backbone_3d_ptr="best_pretrained/CENet_64x512_67_6",
+                 config_path="third_party/Mask2Former/configs/cityscapes/semantic-segmentation/"
+                 "swin/maskformer2_swin_tiny_bs16_90k.yaml",
+                 freeze_bb=True):
         super(Mask2FormerBasePrototype, self).__init__()
 
         if norm_layer is None:
@@ -47,121 +54,121 @@ class Mask2FormerBasePrototype(nn.Module):
             for param in self.backbone_3d.parameters():
                 param.requires_grad = False
 
-        # config = Mask2FormerConfig()
-        config = Mask2FormerConfig.from_pretrained(
-            "facebook/mask2former-swin-tiny-cityscapes-semantic")
-
-        config.decoder_layers = 4
-        config.feature_size = 128
-        config.ignore_value = 0
-        config.mask_feature_size = 128
-        config.num_labels = nclasses
-
-        self.decoder = Mask2FormerTransformerModule(
-            config.feature_size, config)
-        
-        self.class_predictor = nn.Linear(256, config.num_labels)
+        cfg = get_cfg()
+        add_deeplab_config(cfg)
+        m2f_config.add_maskformer2_config(cfg)
+        cfg.merge_from_file(config_path)
+        cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES = nclasses - 1
+        cfg.MODEL.MASK_FORMER.DEC_LAYERS = 4
+        self.decoder = MultiScaleMaskedTransformerDecoder(cfg, in_channels=128, mask_classification=True)
+        self.mask_conv = BasicConv2d(128, 256, 1)
+        self.class_predictor = nn.Linear(256, nclasses)
+        self.temp = BasicConv2d(100, nclasses, 1)
 
     def forward(self, x, _):
         # * get RGB features
         x = self.backbone_3d.feature_extractor(x)
 
-        out = self.decoder(multi_scale_features=x[1:],
-                           mask_features=x[0],
-                           output_hidden_states=True,
-                           output_attentions=False)
+        out = self.decoder(x=x[1:], mask_features=self.mask_conv(x[0]))
+        outputs = F.softmax(self.temp(out['pred_masks']), dim=1)
+        # def get_fina  _mask(masks_classes, masks_probs):
+        #     # out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
+        #     # Transpose the masks_probs tensor to get shape (batch_size, height*width, num_classes)
+        #     batch_size, num_queries, height, width = masks_probs.shape
+        #     _, _, num_classes = masks_classes.shape
+        #     # Reshape masks_classes to get shape (batch_size, num_queries, num_classes, 1)
+        #     masks_classes_r = masks_classes.unsqueeze(-1)
 
-        class_queries_logits = ()
+        #     # Reshape masks_probs to get shape (batch_size, num_queries, height*width)
+        #     masks_probs_r = masks_probs.reshape(batch_size, num_queries, -1)
 
-        for decoder_output in out.intermediate_hidden_states:
-            class_prediction = self.class_predictor(decoder_output.transpose(0, 1))
-            class_queries_logits += (class_prediction,)
+        #     # Perform matrix multiplication using torch.matmul()
+        #     out_r = torch.matmul(masks_classes_r, masks_probs_r)
 
-        masks_queries_logits = out.masks_queries_logits
-        outputs = []
-        for i in range(len(masks_queries_logits)):
-            masks_classes = class_queries_logits[-i]
-            # [batch_size, num_queries, height, width]
-            masks_probs = masks_queries_logits[-i]
-            # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
-            out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
-            outputs.append(out)
+        #     # Reshape the result to get the output tensor with shape (batch_size, height, width, num_classes)
+        #     out = out_r.reshape(batch_size, height, width, num_classes).permute(0, 3, 1, 2)
+        #     return F.softmax(out, dim=1)
+
+        # outputs = []
+        # outputs.append(get_final_mask(out['pred_logits'], out['pred_masks']))
+        # for aux_out in out['aux_outputs']:
+        #     outputs.append(get_final_mask(aux_out['pred_logits'], aux_out['pred_masks']))
 
         return outputs
 
-class Mask2FormerTransformerModule(nn.Module):
-    """
-    The Mask2Former's transformer module.
-    """
+# class Mask2FormerTransformerModule(nn.Module):
+#     """
+#     The Mask2Former's transformer module.
+#     """
 
-    def __init__(self, in_features: int, config: Mask2FormerConfig):
-        super().__init__()
-        hidden_dim = config.hidden_dim
-        self.num_feature_levels = 3
-        self.position_embedder = Mask2FormerSinePositionEmbedding(
-            num_pos_feats=hidden_dim // 2, normalize=True)
-        self.queries_embedder = nn.Embedding(config.num_queries, hidden_dim)
-        self.queries_features = nn.Embedding(config.num_queries, hidden_dim)
-        self.input_projections = []
+#     def __init__(self, in_features: int, config: Mask2FormerConfig):
+#         super().__init__()
+#         hidden_dim = config.hidden_dim
+#         self.num_feature_levels = 3
+#         self.position_embedder = Mask2FormerSinePositionEmbedding(
+#             num_pos_feats=hidden_dim // 2, normalize=True)
+#         self.queries_embedder = nn.Embedding(config.num_queries, hidden_dim)
+#         self.queries_features = nn.Embedding(config.num_queries, hidden_dim)
+#         self.input_projections = []
 
-        for _ in range(self.num_feature_levels):
-            if in_features != hidden_dim or config.enforce_input_projection:
-                self.input_projections.append(
-                    nn.Conv2d(in_features, hidden_dim, kernel_size=1))
-            else:
-                self.input_projections.append(nn.Sequential())
+#         for _ in range(self.num_feature_levels):
+#             if in_features != hidden_dim or config.enforce_input_projection:
+#                 self.input_projections.append(
+#                     nn.Conv2d(in_features, hidden_dim, kernel_size=1))
+#             else:
+#                 self.input_projections.append(nn.Sequential())
 
-        self.input_projections = nn.ModuleList(self.input_projections)
-        self.decoder = Mask2FormerMaskedAttentionDecoder(config=config)
-        self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
+#         self.input_projections = nn.ModuleList(self.input_projections)
+#         self.decoder = Mask2FormerMaskedAttentionDecoder(config=config)
+#         self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
 
-    def forward(
-        self,
-        multi_scale_features: List[Tensor],
-        mask_features: Tensor,
-        output_hidden_states: bool = False,
-        output_attentions: bool = False,
-    ) -> Mask2FormerMaskedAttentionDecoderOutput:
-        multi_stage_features = []
-        multi_stage_positional_embeddings = []
-        size_list = []
+#     def forward(
+#         self,
+#         multi_scale_features: List[Tensor],
+#         mask_features: Tensor,
+#         output_hidden_states: bool = False,
+#         output_attentions: bool = False,
+#     ) -> Mask2FormerMaskedAttentionDecoderOutput:
+#         multi_stage_features = []
+#         multi_stage_positional_embeddings = []
+#         size_list = []
 
-        for i in range(self.num_feature_levels):
-            size_list.append(multi_scale_features[i].shape[-2:])
-            multi_stage_positional_embeddings.append(
-                self.position_embedder(multi_scale_features[i], None).flatten(2))
-            multi_stage_features.append(
-                self.input_projections[i](multi_scale_features[i]).flatten(2)
-                + self.level_embed.weight[i][None, :, None]
-            )
+#         for i in range(self.num_feature_levels):
+#             size_list.append(multi_scale_features[i].shape[-2:])
+#             multi_stage_positional_embeddings.append(
+#                 self.position_embedder(multi_scale_features[i], None).flatten(2))
+#             multi_stage_features.append(
+#                 self.input_projections[i](multi_scale_features[i]).flatten(2)
+#                 + self.level_embed.weight[i][None, :, None]
+#             )
 
-            # Flatten (batch_size, num_channels, height, width) -> (height*width, batch_size, num_channels)
-            multi_stage_positional_embeddings[-1] = multi_stage_positional_embeddings[-1].permute(
-                2, 0, 1)
-            multi_stage_features[-1] = multi_stage_features[-1].permute(
-                2, 0, 1)
+#             # Flatten (batch_size, num_channels, height, width) -> (height*width, batch_size, num_channels)
+#             multi_stage_positional_embeddings[-1] = multi_stage_positional_embeddings[-1].permute(
+#                 2, 0, 1)
+#             multi_stage_features[-1] = multi_stage_features[-1].permute(
+#                 2, 0, 1)
 
-        _, batch_size, _ = multi_stage_features[0].shape
+#         _, batch_size, _ = multi_stage_features[0].shape
 
-        # [num_queries, batch_size, num_channels]
-        query_embeddings = self.queries_embedder.weight.unsqueeze(
-            1).repeat(1, batch_size, 1)
-        query_features = self.queries_features.weight.unsqueeze(
-            1).repeat(1, batch_size, 1)
+#         # [num_queries, batch_size, num_channels]
+#         query_embeddings = self.queries_embedder.weight.unsqueeze(
+#             1).repeat(1, batch_size, 1)
+#         query_features = self.queries_features.weight.unsqueeze(
+#             1).repeat(1, batch_size, 1)
 
-        decoder_output = self.decoder(
-            inputs_embeds=query_features,
-            multi_stage_positional_embeddings=multi_stage_positional_embeddings,
-            pixel_embeddings=mask_features,
-            encoder_hidden_states=multi_stage_features,
-            query_position_embeddings=query_embeddings,
-            feature_size_list=size_list,
-            output_hidden_states=output_hidden_states,
-            output_attentions=output_attentions,
-            return_dict=True,
-        )
+#         decoder_output = self.decoder(
+#             inputs_embeds=query_features,
+#             multi_stage_positional_embeddings=multi_stage_positional_embeddings,
+#             pixel_embeddings=mask_features,
+#             encoder_hidden_states=multi_stage_features,
+#             query_position_embeddings=query_embeddings,
+#             feature_size_list=size_list,
+#             output_hidden_states=output_hidden_states,
+#             output_attentions=output_attentions,
+#             return_dict=True,
+#         )
 
-        return decoder_output
+#         return decoder_output
 
 
 if __name__ == "__main__":
