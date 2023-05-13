@@ -38,7 +38,7 @@ if __name__ == '__main__':
         '--arch_cfg', '-ac',
         type=str,
         required=False,
-        default='config/arch/m2f-512-OV.yml',
+        default='config/arch/fusion-512-subset.yml',
         help='Architecture yaml cfg file. See /config/arch for sample. No default!',
     )
     parser.add_argument(
