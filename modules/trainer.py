@@ -18,7 +18,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion import Fusion
+from modules.network.Fusion_double import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
