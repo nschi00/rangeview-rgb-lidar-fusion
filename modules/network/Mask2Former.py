@@ -40,14 +40,13 @@ class Mask2FormerBasePrototype(nn.Module):
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        self.backbone_3d = ResNet_34(nclasses, aux, block,
+        self.backbone_3d = ResNet_34(nclasses, True, block,
                                      layers, if_BN,
                                      width_per_group=width_per_group,
                                      groups=groups)
 
         if backbone_3d_ptr is not None:
-            w_dict = torch.load(
-                backbone_3d_ptr, map_location=lambda storage, loc: storage)
+            w_dict = torch.load(backbone_3d_ptr, map_location=lambda storage, loc: storage)
             self.backbone_3d.load_state_dict(w_dict['state_dict'], strict=True)
 
         if freeze_bb:
@@ -58,41 +57,23 @@ class Mask2FormerBasePrototype(nn.Module):
         add_deeplab_config(cfg)
         m2f_config.add_maskformer2_config(cfg)
         cfg.merge_from_file(config_path)
-        cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES = nclasses - 1
         cfg.MODEL.MASK_FORMER.DEC_LAYERS = 4
+        self.aux = aux
         self.decoder = MultiScaleMaskedTransformerDecoder(cfg, in_channels=128, mask_classification=True)
         self.mask_conv = BasicConv2d(128, 256, 1)
         self.class_predictor = nn.Linear(256, nclasses)
-        self.temp = BasicConv2d(100, nclasses, 1)
+        self.mask_pred = BasicConv2d(100, nclasses, 1)
 
     def forward(self, x, _):
         # * get RGB features
         x = self.backbone_3d.feature_extractor(x)
 
         out = self.decoder(x=x[1:], mask_features=self.mask_conv(x[0]))
-        outputs = F.softmax(self.temp(out['pred_masks']), dim=1)
-        # def get_fina  _mask(masks_classes, masks_probs):
-        #     # out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
-        #     # Transpose the masks_probs tensor to get shape (batch_size, height*width, num_classes)
-        #     batch_size, num_queries, height, width = masks_probs.shape
-        #     _, _, num_classes = masks_classes.shape
-        #     # Reshape masks_classes to get shape (batch_size, num_queries, num_classes, 1)
-        #     masks_classes_r = masks_classes.unsqueeze(-1)
-
-        #     # Reshape masks_probs to get shape (batch_size, num_queries, height*width)
-        #     masks_probs_r = masks_probs.reshape(batch_size, num_queries, -1)
-
-        #     # Perform matrix multiplication using torch.matmul()
-        #     out_r = torch.matmul(masks_classes_r, masks_probs_r)
-
-        #     # Reshape the result to get the output tensor with shape (batch_size, height, width, num_classes)
-        #     out = out_r.reshape(batch_size, height, width, num_classes).permute(0, 3, 1, 2)
-        #     return F.softmax(out, dim=1)
-
-        # outputs = []
-        # outputs.append(get_final_mask(out['pred_logits'], out['pred_masks']))
-        # for aux_out in out['aux_outputs']:
-        #     outputs.append(get_final_mask(aux_out['pred_logits'], aux_out['pred_masks']))
+        outputs = [F.softmax(self.mask_pred(out['pred_masks']), dim=1)]
+        if not self.aux:
+            return outputs
+        for aux_out in out['aux_outputs']:
+            outputs.append(F.softmax(self.mask_pred(aux_out['pred_masks']), dim=1))
 
         return outputs
 

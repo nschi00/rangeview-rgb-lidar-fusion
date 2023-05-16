@@ -89,6 +89,97 @@ class BasicBlock(nn.Module):
         out = self.relu(out)
         return out
 
+class ResNet_tfbu(nn.Module):
+    def __init__(self,
+                 nclasses, aux=True,
+                 block=BasicBlock,
+                 layers=[3, 4, 6, 3],
+                 if_BN=True, dilation=1,
+                 norm_layer=nn.BatchNorm2d,
+                 groups=1, inplanes=128,
+                 width_per_group=64) -> None:
+        super().__init__()
+        self.if_BN = if_BN
+        self.groups = groups
+        self.aux = aux
+        self.base_width = width_per_group
+        self._norm_layer = norm_layer
+        self.dilation = dilation
+        self.inplanes = inplanes
+        
+        self.initial_conv = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
+                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                          BasicConv2d(128, 128, kernel_size=3, padding=1))
+
+        self.unet_layers = nn.ModuleList()
+        for i, j in enumerate([1, 2, 2, 2]):
+            self.unet_layers.append(self._make_layer(block, 128, layers[i], stride=j))
+        
+        #self.upscale_conv = [BasicConv2d(256, 128, kernel_size=3, padding=1)]*4
+        self.upscale_conv = nn.ModuleList()
+        for i in range(4):
+            self.upscale_conv.append(BasicConv2d(256, 128, kernel_size=3, padding=1))
+
+        if self.aux:
+            self.aux_heads = nn.ModuleList()
+            for i in range(4):
+                self.aux_heads.append(BasicConv2d(128, nclasses, kernel_size=3, padding=1))
+            
+        self.semantic_output = nn.Conv2d(128, nclasses, 1)    
+            
+    def forward(self, x, _):
+        x = self.initial_conv(x)
+        x_features = {'0': x}
+        del x
+        for i in range(0, 4):
+            x_features[str(i + 1)] = self.unet_layers[i](x_features[str(i)])
+        
+        for i in reversed(range(1,5)):
+            target_size = x_features[str(i-1)].size()[2:]
+            current_feat = F.interpolate(x_features[str(i)], size=target_size, mode='bilinear', align_corners=True)
+            if i == 1:
+                # * x_features['0'] and ['1'] are the same size so no need interpolation
+                current_feat = x_features[str(i)]
+            x_features[str(i-1)] = self.upscale_conv[i-1](torch.cat([x_features[str(i-1)], current_feat], dim=1))
+        
+        out = [F.softmax(self.semantic_output(x_features['0']), dim=1)]
+        if self.aux:
+            out.append(F.softmax(self.aux_heads[0](x_features['1']), dim=1))
+            for i in range(1,4):
+                upscaled_feats = F.interpolate(x_features[str(i+1)], size=x_features['0'].size()[2:], mode='bilinear', align_corners=True)
+                out.append(F.softmax(self.aux_heads[i](upscaled_feats), dim=1))
+
+        return out
+
+    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
+        norm_layer = self._norm_layer
+        downsample = None
+        previous_dilation = self.dilation
+        if dilate:
+            self.dilation *= stride
+            stride = 1
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            if self.if_BN:
+                downsample = nn.Sequential(
+                    conv1x1(self.inplanes, planes * block.expansion, stride),
+                    norm_layer(planes * block.expansion),
+                )
+            else:
+                downsample = nn.Sequential(
+                    conv1x1(self.inplanes, planes * block.expansion, stride)
+                )
+
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
+                            self.base_width, previous_dilation, if_BN=self.if_BN))
+        self.inplanes = planes * block.expansion
+        for _ in range(1, blocks):
+            layers.append(block(self.inplanes, planes, groups=self.groups,
+                                base_width=self.base_width, dilation=self.dilation,
+                                if_BN=self.if_BN))
+
+        return nn.Sequential(*layers)
+    
 
 class ResNet_34(nn.Module):
     def __init__(self, nclasses, aux=False, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True, zero_init_residual=False,
@@ -213,7 +304,7 @@ class ResNet_34(nn.Module):
 
 if __name__ == "__main__":
     import time
-    model = ResNet_34(20).cuda()
+    model = ResNet_tfbu(20).cuda()
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []

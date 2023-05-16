@@ -5,25 +5,25 @@ train:
   pipeline: "m2f" #  "res" "m2f" "hard"
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
-  aux_loss: True
+  aux_loss: False
   overfit: True
   share_subset_train: 1  # share of data used for training; overfit has to be false
   lamda: 1.0
-  scheduler: "decay" # "cosine" or "decay"
+  scheduler: "cosine" # "cosine" or "decay"
   max_epochs: 5000
   cosine:
     min_lr: 0.00005
-    max_lr: 0.01
-    first_cycle: 50
+    max_lr: 0.0003
+    first_cycle: 150
     cycle: 1
     wup_epochs: 20
     gamma: 0.95
   decay:
     lr: 0.01
     wup_epochs: 5 # warmup during first XX epochs (can be float)
-    lr_decay: 0.992 #0.992 for adam and 0.99 for sgd learning rate decay per epoch after initial cycle (from min lr)
+    lr_decay: 0.995 #0.992 for adam and 0.99 for sgd learning rate decay per epoch after initial cycle (from min lr)
   adamw:
-    lr: 0.0001
+    lr: 0.00005
     wup_epochs: 5
     clip_grad: 0.01 # else 0
   momentum: 0.9 # sgd momentum

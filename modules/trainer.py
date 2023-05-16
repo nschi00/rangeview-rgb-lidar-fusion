@@ -17,7 +17,7 @@ from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
-from modules.network.ResNet import ResNet_34
+from modules.network.ResNet import ResNet_34, ResNet_tfbu
 from modules.network.Fusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
@@ -104,13 +104,11 @@ class Trainer():
         print("Loss weights from content: ", self.loss_w.data)
         F_config = defaultdict(lambda: None)
         with torch.no_grad():
+            activation = eval("nn." + self.ARCH["train"]["act"] + "()")
             if self.ARCH["train"]["pipeline"] == "res":
-                self.model = ResNet_34(self.parser.get_n_classes(),
+                self.model = ResNet_tfbu(self.parser.get_n_classes(),
                                        self.ARCH["train"]["aux_loss"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+                convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 F_config = ARCH["fusion"]
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
@@ -120,13 +118,11 @@ class Trainer():
                                     name_backbone=F_config["name_backbone"],
                                     branch_type=F_config["branch_type"],
                                     stage=F_config["stage"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+                convert_relu_to_softplus(self.model, activation)
             else:
                 self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
                                                       aux=self.ARCH["train"]["aux_loss"])
+
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
