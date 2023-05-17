@@ -5,11 +5,11 @@ train:
   pipeline: "fusion" #  "res" "fid" "hard"
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
-  aux_loss: True
+  aux_loss: False
   overfit: False
   share_subset_train: 0.25  # share of data used for training; overfit has to be false
   lamda: 1.0
-  scheduler: "cosine" # "cosine" or "decay"
+  scheduler: "decay" # "cosine" or "decay"
   max_epochs: 100
   cosine:
     min_lr: 0.0001
@@ -24,8 +24,8 @@ train:
     lr_decay: 0.99 # learning rate decay per epoch after initial cycle (from min lr)
   momentum: 0.9 # sgd momentum
   w_decay: 0.0001 # weight decay
-  batch_size: 8 # batch size
-  report_batch: 10 # every x batches, report loss
+  batch_size: 3 # batch size
+  report_batch: 30 # every x batches, report loss
   report_epoch: 1 # every x epochs, report validation set
   epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)
   save_summary: False # Summary of weight histograms for tensorboard   Must false since not check the api
@@ -41,15 +41,15 @@ train:
 
 
 fusion: # only relevant if pipeline == "fusion"
-  use_att: False # whether to use cross-encoder or convolution for fusion
+  use_att: True # whether to use cross-encoder or convolution for fusion
   fuse_all: "main_late" # "all_early", "all_late", "main_early" or "main_late"
   branch_type: "semantic" # "semantic", "instance" or "panoptic"
   name_backbone: "resnet50" # "resnet50" or "mask2former"
   stage: "combination" # "enc", "pixel_decoder", "combination"
   lr: 0.0002 # learning rate for cross attention fusion
-  w_decay: 0
+  w_decay: 0.0001
   scheduler_gamma: 0.5
-  scheduler_milestones: [400, 700, 1000, 1500, 2000] # Currently for overfitting
+  scheduler_milestones: [20, 50, 60, 80, 90] # Currently for overfitting
 
 
 ################################################################################

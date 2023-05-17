@@ -210,8 +210,8 @@ class Fusion(nn.Module):
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
 
         self.end_conv = nn.Sequential(BasicConv2d(1280, 640, kernel_size=3, padding=1),
-                                      BasicConv2d(640, 256, kernel_size=3, padding=1),
-                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
+                                    BasicConv2d(640, 256, kernel_size=3, padding=1),
+                                    BasicConv2d(256, 128, kernel_size=3, padding=1))
 
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
@@ -224,7 +224,7 @@ class Fusion(nn.Module):
         if not use_att:
             self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
         else:
-            self.fusion_layer = Cross_SW_Attention()
+            self.fusion_layer = Cross_SW_Attention(in_chans=640, embed_dim=128, patch_size=1)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -285,11 +285,16 @@ class Fusion(nn.Module):
                 x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             x_rgb_features[str(i)] = F.interpolate(
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
-
-        x_lidar_features = list(x_lidar_features.values())
-        x_rgb_features = list(x_rgb_features.values())
-        out = torch.cat(x_lidar_features + x_rgb_features, dim=1)
-        out = self.end_conv(out)
+            
+        if not self.use_att:
+            x_lidar_features = list(x_lidar_features.values())
+            x_rgb_features = list(x_rgb_features.values())
+            out = torch.cat(x_lidar_features + x_rgb_features, dim=1)
+            out = self.end_conv(out)
+        else:
+            x_lidar_features = torch.cat(list(x_lidar_features.values()), dim=1)
+            x_rgb_features = torch.cat(list(x_rgb_features.values()), dim=1)
+            out = self.fusion_layer((x_lidar_features, x_rgb_features))
 
         # """LATE FUSION"""
         # if not self.EARLY:
@@ -363,7 +368,7 @@ class Cross_SW_Attention(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
     """
 
-    def __init__(self, pe_type="abs", fusion_type="x_main", embed_dim=128, input_size=(64, 512),
+    def __init__(self, pe_type="abs", fusion_type="x_main", in_chans=128, embed_dim=128, input_size=(64, 512),
                  patch_size=2, depth=3, num_heads=8, window_size=8,
                  mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., norm_layer=nn.LayerNorm):
@@ -376,7 +381,7 @@ class Cross_SW_Attention(nn.Module):
         self.fusion_type = fusion_type
         self.window_size = window_size
 
-        self.patch_embed = PatchEmbed(patch_size=patch_size, in_chans=128, embed_dim=embed_dim,
+        self.patch_embed = PatchEmbed(patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
                                       norm_layer=norm_layer)
 
         self.patch_unembed = PatchUnEmbed(
