@@ -18,7 +18,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34, ResNet_tfbu
-from modules.network.Fusion import Fusion
+from modules.network.Fusion import Fusion, FusionDouble
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
@@ -111,14 +111,15 @@ class Trainer():
                 convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 F_config = ARCH["fusion"]
-                self.model = Fusion(nclasses=self.parser.get_n_classes(),
-                                    aux=self.ARCH["train"]["aux_loss"],
-                                    use_att=F_config["use_att"],
-                                    fusion_scale=F_config["fuse_all"],
-                                    name_backbone=F_config["name_backbone"],
-                                    branch_type=F_config["branch_type"],
-                                    stage=F_config["stage"])
-                convert_relu_to_softplus(self.model, activation)
+                # self.model = Fusion(nclasses=self.parser.get_n_classes(),
+                #                     aux=self.ARCH["train"]["aux_loss"],
+                #                     use_att=F_config["use_att"],
+                #                     fusion_scale=F_config["fuse_all"],
+                #                     name_backbone=F_config["name_backbone"],
+                #                     branch_type=F_config["branch_type"],
+                #                     stage=F_config["stage"])
+                self.model = FusionDouble(nclasses=self.parser.get_n_classes())
+                #convert_relu_to_softplus(self.model, activation)
             else:
                 self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
                                                       aux=self.ARCH["train"]["aux_loss"])
@@ -201,9 +202,9 @@ class Trainer():
                                             lr=F_config["lr"],
                                             weight_decay=F_config["w_decay"])
 
-            self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
-                                                                milestones=F_config["scheduler_milestones"],
-                                                                gamma=F_config["scheduler_gamma"])
+            # self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
+            #                                                     milestones=F_config["scheduler_milestones"],
+            #                                                     gamma=F_config["scheduler_gamma"])
 
         else:
             rest_params = self.model.parameters()

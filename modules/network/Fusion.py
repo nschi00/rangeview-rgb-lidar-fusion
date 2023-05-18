@@ -11,6 +11,8 @@ from ResNet import BasicBlock, BasicConv2d, conv1x1
 from torchvision.models.segmentation import deeplabv3_resnet50
 import torch
 import torch.nn as nn
+import numpy as np
+from SwinFusion import SwinFusion
 
 
 """ This is a torch way of getting the intermediate layers
@@ -148,6 +150,149 @@ class BackBone(nn.Module):
 
         return outputs
 
+class FusionDouble(nn.Module):
+    """
+    All scale fusion with resnet50 backbone
+    Basic fusion with torch.cat + conv1x1
+    use_att: use cross attention or not
+    fusion_scale: "all_early" or "all_late" or "main_late" or "main_early"
+    name_backbone: backbone for RGB, only "resnet50" at the moment possible
+    branch_type: semantic, instance or panoptic
+    stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
+    """
+
+    def __init__(self, nclasses, aux=False, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
+                 norm_layer=None, groups=1, width_per_group=64):
+
+        super(FusionDouble, self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+
+
+        """BASEMODEL"""
+        self._norm_layer = norm_layer
+        self.if_BN = if_BN
+        self.dilation = 1
+        self.aux = aux
+
+        self.groups = groups
+        self.base_width = width_per_group
+
+        self.initial_conv_lidar = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
+                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                          BasicConv2d(128, 128, kernel_size=3, padding=1))
+        
+        self.initial_conv_rgb = nn.Sequential(BasicConv2d(3, 64, kernel_size=3, padding=1),
+                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                          BasicConv2d(128, 128, kernel_size=3, stride=2, padding=1))
+
+        self.inplanes = 128
+
+        self.unet_layers_lidar = nn.ModuleList()
+        for i, j in enumerate([1, 2, 2, 2]):
+            self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
+
+        self.unet_layers_rgb = nn.ModuleList()
+        for i, j in enumerate([1, 2, 2, 2]):
+            self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
+
+        self.end_conv_lidar = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
+                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
+        
+        self.end_conv_rgb = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, stride=(3,1), padding=1),
+                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
+
+        self.semantic_output = nn.Conv2d(128, nclasses, 1)
+
+        if self.aux:
+            self.aux_heads = nn.ModuleDict()
+            for i in range(2, 5):
+                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
+
+        """FUSION LAYERS"""
+        # ! Redefine for different resolutions
+        project_size = np.array([64, 512])  
+        img_size = np.array([192, 512])
+        self.fusion_layer = [
+            SwinFusion(img_size_A=project_size, img_size_B=img_size, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8),
+            SwinFusion(img_size_A=project_size//2, img_size_B=img_size//2, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4),
+            SwinFusion(img_size_A=project_size//4, img_size_B=img_size//4, patch_size_A=(1,2), patch_size_B=(3,2), window_size=2),
+            SwinFusion(img_size_A=project_size//8, img_size_B=img_size//8, patch_size_A=(1,2), patch_size_B=(3,2), window_size=2)
+        ]
+        self.fusion_layer = nn.ModuleList(self.fusion_layer)
+
+    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
+        norm_layer = self._norm_layer
+        downsample = None
+        previous_dilation = self.dilation
+        if dilate:
+            self.dilation *= stride
+            stride = 1
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            if self.if_BN:
+                downsample = nn.Sequential(
+                    conv1x1(self.inplanes, planes * block.expansion, stride),
+                    norm_layer(planes * block.expansion),
+                )
+            else:
+                downsample = nn.Sequential(
+                    conv1x1(self.inplanes, planes * block.expansion, stride)
+                )
+
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
+                            self.base_width, previous_dilation, if_BN=self.if_BN))
+        self.inplanes = planes * block.expansion
+        for _ in range(1, blocks):
+            layers.append(block(self.inplanes, planes, groups=self.groups,
+                                base_width=self.base_width, dilation=self.dilation,
+                                if_BN=self.if_BN))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x, rgb):
+        # * get RGB features
+        rgb = torch.transpose(rgb, 2, 3) # * Make RGB same size as LiDAR
+        proj_size = x.size()[2:]
+        rgb_size = rgb.size()[2:]
+        # rgb_out = self.backbone(rgb)
+
+        # * get projection features
+        x_lidar = self.initial_conv_lidar(x)
+        x_rgb = self.initial_conv_rgb(rgb)
+        
+        proj_size = x_lidar.size()[2:]
+        rgb_size = x_rgb.size()[2:]
+        
+        """FUSION MAIN SCALES"""
+        x_lidar_features = {'0': x_lidar}
+        x_rgb_features = {'0': x_rgb}
+        del x_lidar
+        del x_rgb
+
+        for i in range(0, 4):
+            x_lidar_features[str(i + 1)] = self.unet_layers_lidar[i](x_lidar_features[str(i)])
+            x_rgb_features[str(i + 1)] = self.unet_layers_rgb[i](x_rgb_features[str(i)])
+            x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)] = self.fusion_layer[i](x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)])
+        for i in range(2, 5):
+            x_lidar_features[str(i)] = F.interpolate(
+                x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
+            x_rgb_features[str(i)] = F.interpolate(
+                x_rgb_features[str(i)], size=rgb_size, mode='bilinear', align_corners=True)
+            
+        x_lidar_features = list(x_lidar_features.values())
+        x_rgb_features = list(x_rgb_features.values())
+        
+        out_lidar = self.end_conv_lidar(torch.cat(x_lidar_features, dim=1))
+        out_rgb = self.end_conv_rgb(torch.cat(x_rgb_features, dim=1))
+   
+        out_lidar = self.semantic_output(out_lidar)
+        out_lidar = F.softmax(out_lidar, dim=1)
+        
+        out_rgb = self.semantic_output(out_rgb)
+        out_rgb = F.softmax(out_rgb, dim=1)
+
+        return [out_lidar, out_rgb]
 
 class Fusion(nn.Module):
     """
@@ -326,175 +471,10 @@ class Upscale_head(nn.Module):
         return x_out
 
 
-class Cross_SW_Attention(nn.Module):
-    """_summary_
-
-    Args:
-        pe_type: "abs" or "adaptive"
-        fusion_type: "x_main" or "double_fuse"
-        embed_dim (int): embedded dimension.
-        input_size (tuple[int]): Input size HxW.
-        patch_size (tuple[int]): patch size.
-        depth (int): Number of blocks.
-        num_heads (int): Number of attention heads.
-        window_size (int): Local window size.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
-        qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set.
-        drop (float, optional): Dropout rate. Default: 0.0
-        attn_drop (float, optional): Attention dropout rate. Default: 0.0
-        drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
-        norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
-    """
-
-    def __init__(self, pe_type="abs", fusion_type="x_main", embed_dim=128, input_size=(64, 512),
-                 patch_size=2, depth=3, num_heads=8, window_size=8,
-                 mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., norm_layer=nn.LayerNorm):
-        super().__init__()
-        self.input_size = input_size
-        self.depth = depth
-        self.embed_dim = embed_dim
-        self.fusion_type = fusion_type
-        self.pe_type = pe_type
-        self.fusion_type = fusion_type
-        self.window_size = window_size
-
-        self.patch_embed = PatchEmbed(patch_size=patch_size, in_chans=128, embed_dim=embed_dim,
-                                      norm_layer=norm_layer)
-
-        self.patch_unembed = PatchUnEmbed(
-            img_size=input_size, patch_size=patch_size, embed_dim=embed_dim,
-            norm_layer=norm_layer)
-
-        if self.pe_type == 'abs':
-            patch_size = to_2tuple(patch_size)
-            patches_resolution = [
-                input_size[0] // patch_size[0],
-                input_size[1] // patch_size[1],
-            ]
-
-            self.absolute_pos_embed_A = nn.Parameter(
-                torch.zeros(
-                    1, embed_dim, patches_resolution[0], patches_resolution[1])
-            )
-            self.absolute_pos_embed_B = nn.Parameter(
-                torch.zeros(
-                    1, embed_dim, patches_resolution[0], patches_resolution[1])
-            )
-            trunc_normal_(self.absolute_pos_embed_A, std=0.02)
-            trunc_normal_(self.absolute_pos_embed_B, std=0.02)
-        elif self.pe_type == 'adaptive':
-            pass
-        # TODO: add adaptive PE
-        else:
-            raise NotImplementedError(f"Not support pe type {self.pe_type}.")
-
-        self.pos_drop = nn.Dropout(p=drop)
-
-        """Input resolution = Patch's resolution"""
-        self.cross_attention = Cross_BasicLayer(dim=embed_dim,
-                                                input_resolution=(patches_resolution[0],
-                                                                  patches_resolution[1]),
-                                                depth=depth,
-                                                num_heads=num_heads,
-                                                window_size=window_size,
-                                                mlp_ratio=mlp_ratio,
-                                                qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                                drop=drop, attn_drop=attn_drop,
-                                                drop_path=drop_path,
-                                                norm_layer=norm_layer)
-
-        self.norm_A = norm_layer(self.embed_dim)
-        if fusion_type == 'double_fuse':
-            self.conv_fusion = BasicBlock(256, 128, 1)
-            self.norm_B = norm_layer(self.embed_dim)
-
-    def forward(self, x):
-        # * Divide image into patches
-        x, y = x
-        x = self.patch_embed(x)
-        y = self.patch_embed(y)
-        x_size = (x.shape[2], x.shape[3])
-
-        # * Add position embedding
-        x = (x + self.absolute_pos_embed_A).flatten(2).transpose(1, 2)
-        y = (y + self.absolute_pos_embed_B).flatten(2).transpose(1, 2)
-
-        x = self.pos_drop(x)
-        y = self.pos_drop(y)
-        if self.fusion_type == "x_main":
-            x, _ = self.cross_attention(x, y, x_size)
-            # x = self.norm_A(x)  # B L C
-            x = self.patch_unembed(x, x_size)
-
-        elif self.fusion_type == "double_fuse":
-            x, y = self.cross_attention(x, y, x_size)
-            x = self.norm_Fusion_A(x)  # B L C
-            x = self.patch_unembed(x, x_size)
-
-            y = self.norm_Fusion_B(y)  # B L C
-            y = self.patch_unembed(y, x_size)
-
-            x = torch.cat([x, y], 1)
-            x = self.conv_fusion(x)
-
-        else:
-            raise NotImplementedError(
-                f"Not support fusion type {self.fusion_type}.")
-
-        return x
-
-class PatchEmbed(nn.Module):
-    """Image to Patch Embedding
-    Args:
-        patch_size (int): Patch token size. Default: 4.
-        in_chans (int): Number of input image channels. Default: 3.
-        embed_dim (int): Number of linear projection output channels. Default: 96.
-        norm_layer (nn.Module, optional): Normalization layer. Default: None
-    """
-
-    def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
-        super().__init__()
-        patch_size = to_2tuple(patch_size)
-        self.patch_size = patch_size
-
-        self.in_chans = in_chans
-        self.embed_dim = embed_dim
-
-        self.proj = nn.Sequential(nn.Conv2d(in_chans, embed_dim, kernel_size=1, stride=1),
-                                  nn.MaxPool2d(kernel_size=patch_size, stride=patch_size),
-                                  nn.ReLU(inplace=True))
-
-        pytorch_total_params = sum(p.numel() for p in self.proj.parameters())
-        print(pytorch_total_params)
-        if norm_layer is not None:
-            self.norm = norm_layer(embed_dim)
-        else:
-            self.norm = None
-
-    def forward(self, x):
-        """Forward function."""
-        # padding
-        _, _, H, W = x.size()
-        if W % self.patch_size[1] != 0:
-            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
-        if H % self.patch_size[0] != 0:
-            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
-
-        x = self.proj(x)  # B C Wh Ww
-        if self.norm is not None:
-            Wh, Ww = x.size(2), x.size(3)
-            x = x.flatten(2).transpose(1, 2)
-            x = self.norm(x)
-            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
-
-        return x
-
 
 if __name__ == "__main__":
     import time
-    model = Fusion(20, use_att=False, fusion_scale="main_late").cuda()
+    model = FusionDouble(20).cuda()
     print(model)
 
     pytorch_total_params = sum(p.numel()
@@ -508,7 +488,7 @@ if __name__ == "__main__":
     time_train = []
     for i in range(20):
         input_3D = torch.rand(2, 5, 64, 512).cuda()
-        input_rgb = torch.rand(2, 3, 64, 512).cuda()
+        input_rgb = torch.rand(2, 3, 512*2, 192*2).cuda()
         model.eval()
         with torch.no_grad():
             start_time = time.time()
