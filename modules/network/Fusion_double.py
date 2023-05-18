@@ -3,12 +3,10 @@ import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
 
-from transformers import Mask2FormerModel
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
-from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, PatchUnEmbed
+from third_party.SwinFusion.models.network_swinfusion1 import RSTB, CRSTB, PatchUnEmbed, PatchEmbed, Upsample, UpsampleOneStep
 from ResNet import BasicBlock, BasicConv2d, conv1x1
-from torchvision.models.segmentation import deeplabv3_resnet50
 import torch
 import torch.nn as nn
 
@@ -19,135 +17,6 @@ import torch.nn as nn
       return_layers["layer3"] = "aux"
  backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
 """
-
-
-# class BackBone(nn.Module):
-#     """_summary_
-
-#     Args:
-#         name: name of the backbone
-#         use_att: whether to use attention
-#         fuse_all: whether to fuse all the layers in the backbone
-#         branch_type: semantic, instance or panoptic
-#         stage: whether to only use the encoder, pixel_decoder or
-#                combined pixel/transformer decoder output
-#         in_size: input size of the image
-#     """
-
-#     def __init__(self, name,
-#                  use_att=False,
-#                  fuse_all=False,
-#                  branch_type="semantic",
-#                  stage="combination",
-#                  in_size=(64, 512)):
-#         super().__init__()
-#         assert name in ["resnet50", "mask2former"], \
-#             "Backbone name must be either resnet50 or mask2former"
-#         assert branch_type in ["semantic", "instance", "panoptic"], \
-#             "Branch type must be either semantic, instance or panoptic"
-#         assert stage in ["enc", "pixel_decoder", "combination"]
-
-#         def get_smaller(in_size, scale):
-#             """
-#             Returns a tuple of the smaller size given an input size and scale factor.
-#             """
-#             return (in_size[0] // scale, in_size[1] // scale)
-
-#         self.name = name
-#         self.in_size = in_size
-#         self.branch_type = branch_type
-#         self.stage = stage
-#         self.fuse_all = fuse_all
-#         output_res = [1, 2, 4, 8]  # * Define output resolution
-#         if use_att and fuse_all:
-#             # * only fuse with attention in 2 resolutions to save resources
-#             output_res = [1, 1, 4, 4]
-#         if stage == "enc":
-#             hidden_dim = [96, 192, 384, 768]
-#             self.layer_list = ["encoder_hidden_states"] * 4
-#         elif stage == "pixel_decoder":
-#             hidden_dim = [256] * 4
-#             self.layer_list = ["decoder_hidden_states"] * 3 + ["decoder_last_hidden_state"]
-#         else:  # * stage == "combination"
-#             hidden_dim = [128] * 4
-#             self.layer_list = []  # not necessary for combination
-
-#         if name == "resnet50":
-#             hidden_dim = [2048] + [1024] * 3
-#             self.layer_list = ["out"] + ["aux"] * 3
-#             self.processor = None
-#             self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
-
-#             if fuse_all:
-#                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i],
-#                                                                   128, (8, 16),
-#                                                                   get_smaller(in_size, output_res[i]))
-#                                                      for i in range(3)])
-#                 self.upscale_layers.append(BasicConv2d(hidden_dim[3], 128, 1))
-#             else:
-#                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, (8, 16), in_size)])
-
-#         elif name == "mask2former":
-#             weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(
-#                 branch_type)
-#             if stage != "combination":
-#                 self.backbone = Mask2FormerModel.from_pretrained(
-#                     weight).pixel_level_module
-#             else:
-#                 self.backbone = Mask2FormerModel.from_pretrained(weight)
-#                 self.class_predictor = nn.Linear(256, 128)
-
-#             if fuse_all:
-#                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i], 128,
-#                                                                   get_smaller(in_size, 4),
-#                                                                   get_smaller(in_size, output_res[i]))
-#                                                      for i in range(4)])
-#             else:
-#                 self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128,
-#                                                                   get_smaller(in_size, 4), in_size)])
-
-#         else:
-#             raise NotImplementedError
-
-#         for p in self.backbone.parameters():
-#             p.requires_grad = False
-
-#     def forward(self, x):
-#         with torch.no_grad():
-#             x = self.backbone(
-#                 x, output_hidden_states=True) if self.name != "resnet50" else self.backbone(x)
-
-#         outputs = []
-#         if self.name == "mask2former" and self.stage == "combination":
-#             class_queries_logits = self.class_predictor(torch.stack(x.transformer_decoder_intermediate_states,
-#                                                                     dim=0).transpose(1, 2))
-#             masks_queries_logits = x.masks_queries_logits
-#             del x
-
-#             for i in range(1, 8, 2):
-#                 masks_classes = class_queries_logits[-i]
-#                 # [batch_size, num_queries, height, width]
-#                 masks_probs = masks_queries_logits[-i]
-#                 # Semantic segmentation logits of shape (batch_size, num_channels_lidar=128, height, width)
-#                 out = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
-#                 outputs.append(out)
-#                 if not self.fuse_all:
-#                     break
-#         else:
-#             for i in range(len(self.layer_list)):
-#                 if type(x[self.layer_list[i]]) == tuple:
-#                     out = x[self.layer_list[i]][i]
-#                     outputs.append(out)
-#                 else:
-#                     out = x[self.layer_list[i]]
-#                     outputs.append(out)
-#                     outputs.reverse() if self.name != "resnet50" else outputs
-
-#         for j, layer in enumerate(self.upscale_layers):
-#             outputs[j] = layer(outputs[j])
-
-#         return outputs
-
 
 class Fusion(nn.Module):
     """
@@ -224,7 +93,16 @@ class Fusion(nn.Module):
         if not use_att:
             self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
         else:
-            self.fusion_layer = Cross_SW_Attention(in_chans=640, embed_dim=128, patch_size=1)
+            self.conv_before_fusion = BasicConv2d(640, 128, kernel_size=1, padding=0)
+            upscale = 4
+            window_size = 8
+            height = (64 // upscale // window_size + 1) * window_size
+            width = (512 // upscale // window_size + 1) * window_size
+            self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
+                        window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
+                        Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True)
+            # print(model)
+            # print(height, width, model.flops() / 1e9)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -292,9 +170,9 @@ class Fusion(nn.Module):
             out = torch.cat(x_lidar_features + x_rgb_features, dim=1)
             out = self.end_conv(out)
         else:
-            x_lidar_features = torch.cat(list(x_lidar_features.values()), dim=1)
-            x_rgb_features = torch.cat(list(x_rgb_features.values()), dim=1)
-            out = self.fusion_layer((x_lidar_features, x_rgb_features))
+            x_lidar_features = self.conv_before_fusion(torch.cat(list(x_lidar_features.values()), dim=1))
+            x_rgb_features = self.conv_before_fusion(torch.cat(list(x_rgb_features.values()), dim=1))
+            out = self.fusion_layer(x_lidar_features, x_rgb_features)
 
         # """LATE FUSION"""
         # if not self.EARLY:
@@ -347,170 +225,263 @@ class Upscale_head(nn.Module):
         return x_out
 
 
-class Cross_SW_Attention(nn.Module):
-    """_summary_
+class SwinFusion(nn.Module):
+    r""" SwinIR
+        A PyTorch impl of : `SwinIR: Image Restoration Using Swin Transformer`, based on Swin Transformer.
 
     Args:
-        pe_type: "abs" or "adaptive"
-        fusion_type: "x_main" or "double_fuse"
-        embed_dim (int): embedded dimension.
-        input_size (tuple[int]): Input size HxW.
-        patch_size (tuple[int]): patch size.
-        depth (int): Number of blocks.
-        num_heads (int): Number of attention heads.
-        window_size (int): Local window size.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
-        qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set.
-        drop (float, optional): Dropout rate. Default: 0.0
-        attn_drop (float, optional): Attention dropout rate. Default: 0.0
-        drop_path (float | tuple[float], optional): Stochastic depth rate. Default: 0.0
-        norm_layer (nn.Module, optional): Normalization layer. Default: nn.LayerNorm
+        img_size (int | tuple(int)): Input image size. Default 64
+        patch_size (int | tuple(int)): Patch size. Default: 1
+        in_chans (int): Number of input image channels. Default: 3
+        embed_dim (int): Patch embedding dimension. Default: 96
+        depths (tuple(int)): Depth of each Swin Transformer layer.
+        num_heads (tuple(int)): Number of attention heads in different layers.
+        window_size (int): Window size. Default: 7
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4
+        qkv_bias (bool): If True, add a learnable bias to query, key, value. Default: True
+        qk_scale (float): Override default qk scale of head_dim ** -0.5 if set. Default: None
+        drop_rate (float): Dropout rate. Default: 0
+        attn_drop_rate (float): Attention dropout rate. Default: 0
+        drop_path_rate (float): Stochastic depth rate. Default: 0.1
+        norm_layer (nn.Module): Normalization layer. Default: nn.LayerNorm.
+        ape (bool): If True, add absolute position embedding to the patch embedding. Default: False
+        patch_norm (bool): If True, add normalization after patch embedding. Default: True
+        use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
+        upscale: Upscale factor. 2/3/4/8 for image SR, 1 for denoising and compress artifact reduction
+        img_range: Image range. 1. or 255.
+        upsampler: The reconstruction reconstruction module. 'pixelshuffle'/'pixelshuffledirect'/'nearest+conv'/None
+        resi_connection: The convolutional block before residual connection. '1conv'/'3conv'
     """
 
-    def __init__(self, pe_type="abs", fusion_type="x_main", in_chans=128, embed_dim=128, input_size=(64, 512),
-                 patch_size=2, depth=3, num_heads=8, window_size=8,
-                 mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., norm_layer=nn.LayerNorm):
-        super().__init__()
-        self.input_size = input_size
-        self.depth = depth
-        self.embed_dim = embed_dim
-        self.fusion_type = fusion_type
-        self.pe_type = pe_type
-        self.fusion_type = fusion_type
+    def __init__(self, img_size=64, patch_size=1, in_chans=1,
+                 embed_dim=96, Fusion_depths=[2, 2], Re_depths=[4], 
+                 Fusion_num_heads=[6, 6], Re_num_heads=[6],
+                 window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
+                 norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
+                 use_checkpoint=False, upscale=2, upsampler='', resi_connection='1conv',
+                 **kwargs):
+        super(SwinFusion, self).__init__()
+        num_out_ch = in_chans
+        num_feat = 64
+        embed_dim_temp = int(embed_dim / 2)
+
+        self.upscale = upscale
+        self.upsampler = upsampler
         self.window_size = window_size
 
-        self.patch_embed = PatchEmbed(patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
-                                      norm_layer=norm_layer)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
+        self.Fusion_num_layers = len(Fusion_depths)
+        self.Re_num_layers = len(Re_depths)
+
+        self.embed_dim = embed_dim
+        self.ape = ape
+        self.patch_norm = patch_norm
+        self.num_features = embed_dim
+        self.mlp_ratio = mlp_ratio
+
+        # split image into non-overlapping patches
+        self.patch_embed = PatchEmbed(
+            img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None)
+        num_patches = self.patch_embed.num_patches
+        num_patches = 32768  ###TODO: change to image size multiplication
+        patches_resolution = self.patch_embed.patches_resolution
+        self.patches_resolution = patches_resolution
+
+        # merge non-overlapping patches into image
         self.patch_unembed = PatchUnEmbed(
-            img_size=input_size, patch_size=patch_size, embed_dim=embed_dim,
-            norm_layer=norm_layer)
+            img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None)
+        self.softmax = nn.Softmax(dim=0)
 
-        if self.pe_type == 'abs':
-            patch_size = to_2tuple(patch_size)
-            patches_resolution = [
-                input_size[0] // patch_size[0],
-                input_size[1] // patch_size[1],
-            ]
+        # absolute position embedding
+        if self.ape: 
+            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))   ##TODO: Adapt to batch size and image size
+            trunc_normal_(self.absolute_pos_embed, std=.02)
 
-            self.absolute_pos_embed_A = nn.Parameter(
-                torch.zeros(
-                    1, embed_dim, patches_resolution[0], patches_resolution[1])
-            )
-            self.absolute_pos_embed_B = nn.Parameter(
-                torch.zeros(
-                    1, embed_dim, patches_resolution[0], patches_resolution[1])
-            )
-            trunc_normal_(self.absolute_pos_embed_A, std=0.02)
-            trunc_normal_(self.absolute_pos_embed_B, std=0.02)
-        elif self.pe_type == 'adaptive':
-            pass
-        # TODO: add adaptive PE
+        self.pos_drop = nn.Dropout(p=drop_rate)
+
+        # stochastic depth
+        dpr_Fusion = [x.item() for x in torch.linspace(0, drop_path_rate, sum(Fusion_depths))]  # stochastic depth decay rule
+        dpr_Re = [x.item() for x in torch.linspace(0, drop_path_rate, sum(Re_depths))]  # stochastic depth decay rule
+        
+        self.layers_Fusion = nn.ModuleList()
+        for i_layer in range(self.Fusion_num_layers):
+            layer = CRSTB(dim=embed_dim,
+                         input_resolution=(patches_resolution[0],
+                                           patches_resolution[1]),
+                         depth=Fusion_depths[i_layer],
+                         num_heads=Fusion_num_heads[i_layer],
+                         window_size=window_size,
+                         mlp_ratio=self.mlp_ratio,
+                         qkv_bias=qkv_bias, qk_scale=qk_scale,
+                         drop=drop_rate, attn_drop=attn_drop_rate,
+                         drop_path=dpr_Fusion[sum(Fusion_depths[:i_layer]):sum(Fusion_depths[:i_layer + 1])],  # no impact on SR results
+                         norm_layer=norm_layer,
+                         downsample=None,
+                         use_checkpoint=use_checkpoint,
+                         img_size=img_size,
+                         patch_size=patch_size,
+                         resi_connection=resi_connection
+                         )
+            self.layers_Fusion.append(layer)
+        self.norm_Fusion_A = norm_layer(self.num_features)
+        self.norm_Fusion_B = norm_layer(self.num_features)
+        
+        self.layers_Re = nn.ModuleList()
+        for i_layer in range(self.Re_num_layers):
+            layer = RSTB(dim=embed_dim,
+                         input_resolution=(patches_resolution[0],
+                                           patches_resolution[1]),
+                         depth=Re_depths[i_layer],
+                         num_heads=Re_num_heads[i_layer],
+                         window_size=window_size,
+                         mlp_ratio=self.mlp_ratio,
+                         qkv_bias=qkv_bias, qk_scale=qk_scale,
+                         drop=drop_rate, attn_drop=attn_drop_rate,
+                         drop_path=dpr_Re[sum(Re_depths[:i_layer]):sum(Re_depths[:i_layer + 1])],  # no impact on SR results
+                         norm_layer=norm_layer,
+                         downsample=None,
+                         use_checkpoint=use_checkpoint,
+                         img_size=img_size,
+                         patch_size=patch_size,
+                         resi_connection=resi_connection
+                         )
+            self.layers_Re.append(layer)
+        self.norm_Re = norm_layer(self.num_features)
+
+        # build the last conv layer in deep feature extraction
+        if resi_connection == '1conv':
+            self.conv_after_body_Fusion = nn.Conv2d(2 * embed_dim, embed_dim, 3, 1, 1)
+
+        elif resi_connection == '3conv':
+            # to save parameters and memory
+            self.conv_after_body = nn.Sequential(nn.Conv2d(embed_dim, embed_dim // 4, 3, 1, 1),
+                                                 nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                                                 nn.Conv2d(embed_dim // 4, embed_dim // 4, 1, 1, 0),
+                                                 nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                                                 nn.Conv2d(embed_dim // 4, embed_dim, 3, 1, 1))
+
+        if self.upsampler == 'pixelshuffle':
+            # for classical SR
+            self.conv_before_upsample = nn.Sequential(nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
+                                                      nn.LeakyReLU(inplace=True))
+            self.upsample = Upsample(upscale, num_feat)
+            self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+        elif self.upsampler == 'pixelshuffledirect':
+            # for lightweight SR (to save parameters)
+            self.upsample = UpsampleOneStep(upscale, embed_dim, num_out_ch,
+                                            (patches_resolution[0], patches_resolution[1]))
+        elif self.upsampler == 'nearest+conv':
+            # for real-world SR (less artifacts)
+            assert self.upscale == 4, 'only support x4 now.'
+            self.conv_before_upsample = nn.Sequential(nn.Conv2d(embed_dim, num_feat, 3, 1, 1),
+                                                      nn.LeakyReLU(inplace=True))
+            self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_up2 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_hr = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+            self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
         else:
-            raise NotImplementedError(f"Not support pe type {self.pe_type}.")
+            # for image denoising and JPEG compression artifact reduction
+            self.conv_last1 = nn.Conv2d(embed_dim, embed_dim_temp, 3, 1, 1)
+            self.conv_last2 = nn.Conv2d(embed_dim_temp, int(embed_dim_temp/2), 3, 1, 1)
+            self.conv_last3 = nn.Conv2d(int(embed_dim_temp/2), num_out_ch, 3, 1, 1)
 
-        self.pos_drop = nn.Dropout(p=drop)
+        self.apply(self._init_weights)
 
-        """Input resolution = Patch's resolution"""
-        self.cross_attention = Cross_BasicLayer(dim=embed_dim,
-                                                input_resolution=(patches_resolution[0],
-                                                                  patches_resolution[1]),
-                                                depth=depth,
-                                                num_heads=num_heads,
-                                                window_size=window_size,
-                                                mlp_ratio=mlp_ratio,
-                                                qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                                drop=drop, attn_drop=attn_drop,
-                                                drop_path=drop_path,
-                                                norm_layer=norm_layer)
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
 
-        self.norm_A = norm_layer(self.embed_dim)
-        if fusion_type == 'double_fuse':
-            self.conv_fusion = BasicBlock(256, 128, 1)
-            self.norm_B = norm_layer(self.embed_dim)
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'absolute_pos_embed'}
 
-    def forward(self, x):
-        # * Divide image into patches
-        x, y = x
+    @torch.jit.ignore
+    def no_weight_decay_keywords(self):
+        return {'relative_position_bias_table'}
+
+    def check_image_size(self, x):
+        _, _, h, w = x.size()
+        mod_pad_h = (self.window_size - h % self.window_size) % self.window_size
+        mod_pad_w = (self.window_size - w % self.window_size) % self.window_size
+        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+        return x
+
+    def forward_features_Fusion(self, x, y):
+        x_size = (x.shape[2], x.shape[3])
         x = self.patch_embed(x)
         y = self.patch_embed(y)
-        x_size = (x.shape[2], x.shape[3])
-
-        # * Add position embedding
-        x = (x + self.absolute_pos_embed_A).flatten(2).transpose(1, 2)
-        y = (y + self.absolute_pos_embed_B).flatten(2).transpose(1, 2)
-
+        if self.ape:
+            x = x + self.absolute_pos_embed
+            y = y + self.absolute_pos_embed
         x = self.pos_drop(x)
         y = self.pos_drop(y)
-        if self.fusion_type == "x_main":
-            x, _ = self.cross_attention(x, y, x_size)
-            # x = self.norm_A(x)  # B L C
-            x = self.patch_unembed(x, x_size)
+        
+        for layer in self.layers_Fusion:
+            x, y = layer(x, y, x_size)
+            # y = layer(y, x, x_size)
+            
 
-        elif self.fusion_type == "double_fuse":
-            x, y = self.cross_attention(x, y, x_size)
-            x = self.norm_Fusion_A(x)  # B L C
-            x = self.patch_unembed(x, x_size)
+        x = self.norm_Fusion_A(x)  # B L C
+        x = self.patch_unembed(x, x_size)
 
-            y = self.norm_Fusion_B(y)  # B L C
-            y = self.patch_unembed(y, x_size)
-
-            x = torch.cat([x, y], 1)
-            x = self.conv_fusion(x)
-
-        else:
-            raise NotImplementedError(
-                f"Not support fusion type {self.fusion_type}.")
-
+        y = self.norm_Fusion_B(y)  # B L C
+        y = self.patch_unembed(y, x_size)
+        x = torch.cat([x, y], 1)
+        ## Downsample the feature in the channel dimension
+        x = self.lrelu(self.conv_after_body_Fusion(x))
+        
         return x
 
-class PatchEmbed(nn.Module):
-    """Image to Patch Embedding
-    Args:
-        patch_size (int): Patch token size. Default: 4.
-        in_chans (int): Number of input image channels. Default: 3.
-        embed_dim (int): Number of linear projection output channels. Default: 96.
-        norm_layer (nn.Module, optional): Normalization layer. Default: None
-    """
+    def forward_features_Re(self, x):        
+        x_size = (x.shape[2], x.shape[3])
+        x = self.patch_embed(x)
+        if self.ape:
+            x = x + self.absolute_pos_embed
+        x = self.pos_drop(x)
 
-    def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
-        super().__init__()
-        patch_size = to_2tuple(patch_size)
-        self.patch_size = patch_size
+        for layer in self.layers_Re:
+            x = layer(x, x_size)
 
-        self.in_chans = in_chans
-        self.embed_dim = embed_dim
-
-        self.proj = nn.Sequential(nn.Conv2d(in_chans, embed_dim, kernel_size=1, stride=1),
-                                  nn.MaxPool2d(kernel_size=patch_size, stride=patch_size),
-                                  nn.ReLU(inplace=True))
-
-        pytorch_total_params = sum(p.numel() for p in self.proj.parameters())
-        print(pytorch_total_params)
-        if norm_layer is not None:
-            self.norm = norm_layer(embed_dim)
-        else:
-            self.norm = None
-
-    def forward(self, x):
-        """Forward function."""
-        # padding
-        _, _, H, W = x.size()
-        if W % self.patch_size[1] != 0:
-            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
-        if H % self.patch_size[0] != 0:
-            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
-
-        x = self.proj(x)  # B C Wh Ww
-        if self.norm is not None:
-            Wh, Ww = x.size(2), x.size(3)
-            x = x.flatten(2).transpose(1, 2)
-            x = self.norm(x)
-            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
-
+        x = self.norm_Re(x)  # B L C
+        x = self.patch_unembed(x, x_size)
+        # Convolution 
+        x = self.lrelu(self.conv_last1(x))
+        x = self.lrelu(self.conv_last2(x))
+        x = self.conv_last3(x) 
         return x
+
+    def forward(self, x, y):
+        # print("Initializing the model")
+
+        x = self.forward_features_Fusion(x, y)
+        x = self.forward_features_Re(x)
+
+        _, _, H, W = x.shape            
+        
+        return x[:, :, :H*self.upscale, :W*self.upscale]
+
+    # def flops(self):
+    #     flops = 0
+    #     H, W = self.patches_resolution
+    #     flops += H * W * 3 * self.embed_dim * 9
+    #     flops += self.patch_embed.flops()
+    #     for i, layer in enumerate(self.layers_Fusion):
+    #         flops += layer.flops()
+    #     for i, layer in enumerate(self.layers_Re):
+    #         flops += layer.flops()
+    #     flops += H * W * 3 * self.embed_dim * self.embed_dim
+    #     flops += self.upsample.flops()
+    #     return flops    
 
 
 if __name__ == "__main__":

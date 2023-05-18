@@ -205,9 +205,9 @@ class Trainer():
                                             lr=F_config["lr"],
                                             weight_decay=F_config["w_decay"])
 
-            self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
-                                                                milestones=F_config["scheduler_milestones"],
-                                                                gamma=F_config["scheduler_gamma"])
+            # self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
+            #                                                     milestones=F_config["scheduler_milestones"],
+            #                                                     gamma=F_config["scheduler_gamma"])
 
         else:
             rest_params = self.model.parameters()
