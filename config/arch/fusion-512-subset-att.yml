@@ -19,12 +19,12 @@ train:
     wup_epochs: 1
     gamma: 1.0
   decay:
-    lr: 0.01
+    lr: 0.005
     wup_epochs: 1 # warmup during first XX epochs (can be float)
-    lr_decay: 0.99 # learning rate decay per epoch after initial cycle (from min lr)
+    lr_decay: 1 # learning rate decay per epoch after initial cycle (from min lr)
   momentum: 0.9 # sgd momentum
-  w_decay: 0.0001 # weight decay
-  batch_size: 3 # batch size
+  w_decay: 0.000001 # weight decay
+  batch_size: 1 # batch size
   report_batch: 30 # every x batches, report loss
   report_epoch: 1 # every x epochs, report validation set
   epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)

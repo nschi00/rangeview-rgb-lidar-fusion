@@ -201,9 +201,9 @@ class Trainer():
             fusion_params = self.model.fusion_layer.parameters()
             rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
 
-            self.att_optimizer = optim.Adam(fusion_params,
-                                            lr=F_config["lr"],
-                                            weight_decay=F_config["w_decay"])
+            # self.att_optimizer = optim.Adam(fusion_params,
+            #                                 lr=F_config["lr"],
+            #                                 weight_decay=F_config["w_decay"])
 
             # self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
             #                                                     milestones=F_config["scheduler_milestones"],
@@ -218,7 +218,7 @@ class Trainer():
             self.clip_grad = ARCH["train"]["adamw"]["clip_grad"]
             self.optimizer = optim.AdamW(rest_params, lr=lr, weight_decay=w_decay)
         else:
-            self.optimizer = optim.SGD(rest_params,
+            self.optimizer = optim.SGD(list(rest_params)+list(fusion_params),
                                        lr=lr,  # min_lr
                                        momentum=momentum,
                                        weight_decay=self.ARCH["train"]["w_decay"])
