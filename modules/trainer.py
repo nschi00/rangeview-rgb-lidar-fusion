@@ -130,17 +130,17 @@ class Trainer():
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
-        if F_config["name_backbone"]:
-            print("{}_{}_{}_{}". format(F_config["name_backbone"],
-                                        "ca" if F_config["use_att"] else "conv",
-                                        F_config["fuse_all"],
+        # if F_config["name_backbone"]:
+        #     print("{}_{}_{}_{}". format(F_config["name_backbone"],
+        #                                 "ca" if F_config["use_att"] else "conv",
+        #                                 F_config["fuse_all"],
 
-                                        "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-            if F_config["name_backbone"] == "mask2former":
-                print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
+        #                                 "" if self.ARCH["train"]["aux_loss"] else "noaux"))
+        #     if F_config["name_backbone"] == "mask2former":
+        #         print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
 
-            print("Please verify your settings before continue.")
-            time.sleep(7)
+        #     print("Please verify your settings before continue.")
+        #     time.sleep(7)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -198,7 +198,7 @@ class Trainer():
             fusion_params = self.model.fusion_layer.parameters()
             rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
 
-            self.att_optimizer = optim.Adam(fusion_params,
+            self.att_optimizer = optim.AdamW(fusion_params,
                                             lr=F_config["lr"],
                                             weight_decay=F_config["w_decay"])
 

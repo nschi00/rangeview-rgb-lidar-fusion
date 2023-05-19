@@ -151,73 +151,67 @@ class BackBone(nn.Module):
         return outputs
 
 class FusionDouble(nn.Module):
-    """
-    All scale fusion with resnet50 backbone
-    Basic fusion with torch.cat + conv1x1
-    use_att: use cross attention or not
-    fusion_scale: "all_early" or "all_late" or "main_late" or "main_early"
-    name_backbone: backbone for RGB, only "resnet50" at the moment possible
-    branch_type: semantic, instance or panoptic
-    stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
+    """_summary_
+    Twin Fusion for LiDAR and RGB
+
+    Args:
+        nclasses: number of classes
+        block: block type
+        layers: number of layers
+        if_BN: whether to use batch normalization
+        norm_layer: normalization layer
+        groups: number of groups
+        width_per_group: width per group
     """
 
-    def __init__(self, nclasses, aux=False, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
+    def __init__(self, nclasses, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64):
 
         super(FusionDouble, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
-
-        """BASEMODEL"""
         self._norm_layer = norm_layer
         self.if_BN = if_BN
         self.dilation = 1
-        self.aux = aux
 
         self.groups = groups
         self.base_width = width_per_group
 
         self.initial_conv_lidar = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
-                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                          BasicConv2d(128, 128, kernel_size=3, padding=1))
+                                                BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                                BasicConv2d(128, 128, kernel_size=3, padding=1))
         
         self.initial_conv_rgb = nn.Sequential(BasicConv2d(3, 64, kernel_size=3, padding=1),
-                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                          BasicConv2d(128, 128, kernel_size=3, stride=2, padding=1))
+                                              BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                              BasicConv2d(128, 128, kernel_size=3, stride=2, padding=1))
 
         self.inplanes = 128
 
         self.unet_layers_lidar = nn.ModuleList()
-        for i, j in enumerate([1, 2, 2, 2]):
-            self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
-
         self.unet_layers_rgb = nn.ModuleList()
         for i, j in enumerate([1, 2, 2, 2]):
+            self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
 
         self.end_conv_lidar = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
-                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
+                                            BasicConv2d(256, 128, kernel_size=3, padding=1))
         
         self.end_conv_rgb = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, stride=(3,1), padding=1),
-                                      BasicConv2d(256, 128, kernel_size=3, padding=1))
+                                          BasicConv2d(256, 128, kernel_size=3, padding=1))
 
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
-
-        if self.aux:
-            self.aux_heads = nn.ModuleDict()
-            for i in range(2, 5):
-                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
         # ! Redefine for different resolutions
         project_size = np.array([64, 512])  
         img_size = np.array([192, 512])
+        # TODO:Check original paper for better understanding
         self.fusion_layer = [
-            SwinFusion(img_size_A=project_size, img_size_B=img_size, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8),
-            SwinFusion(img_size_A=project_size//2, img_size_B=img_size//2, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4),
-            SwinFusion(img_size_A=project_size//4, img_size_B=img_size//4, patch_size_A=(1,2), patch_size_B=(3,2), window_size=2),
-            SwinFusion(img_size_A=project_size//8, img_size_B=img_size//8, patch_size_A=(1,2), patch_size_B=(3,2), window_size=2)
+            SwinFusion(img_size_A=project_size, img_size_B=img_size, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//2, img_size_B=img_size//2, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//4, img_size_B=img_size//4, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//8, img_size_B=img_size//8, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4, mlp_ratio=2)
         ]
         self.fusion_layer = nn.ModuleList(self.fusion_layer)
 
@@ -255,16 +249,14 @@ class FusionDouble(nn.Module):
         rgb = torch.transpose(rgb, 2, 3) # * Make RGB same size as LiDAR
         proj_size = x.size()[2:]
         rgb_size = rgb.size()[2:]
-        # rgb_out = self.backbone(rgb)
 
-        # * get projection features
+        # * get projection and rgb features
         x_lidar = self.initial_conv_lidar(x)
         x_rgb = self.initial_conv_rgb(rgb)
         
         proj_size = x_lidar.size()[2:]
         rgb_size = x_rgb.size()[2:]
         
-        """FUSION MAIN SCALES"""
         x_lidar_features = {'0': x_lidar}
         x_rgb_features = {'0': x_rgb}
         del x_lidar
@@ -471,15 +463,25 @@ class Upscale_head(nn.Module):
         return x_out
 
 
+def get_n_params(model):
+    pytorch_total_params = sum(p.numel()
+                               for p in model.parameters() if p.requires_grad)
+    #print(pytorch_total_params)
+    return pytorch_total_params
 
 if __name__ == "__main__":
     import time
     model = FusionDouble(20).cuda()
     print(model)
-
+    total = 0
+    for module_name, module in model.named_children():
+        print(module_name)
+        print(get_n_params(module))
+        total += get_n_params(module)
     pytorch_total_params = sum(p.numel()
                                for p in model.parameters() if p.requires_grad)
-    print("Number of parameters: ", pytorch_total_params / 1000000, "M")
+    print(total)
+    print(pytorch_total_params)
 
     # for module_name, module in model.named_parameters():
     #     if "fusion" in module_name:
