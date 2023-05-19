@@ -38,14 +38,14 @@ if __name__ == '__main__':
         '--arch_cfg', '-ac',
         type=str,
         required=False,
-        default='config/arch/fusion-512-OV.yml',
+        default='config/arch/fusion-512-subset.yml',
         help='Architecture yaml cfg file. See /config/arch for sample. No default!',
     )
     parser.add_argument(
         '--data_cfg', '-dc',
         type=str,
         required=False,
-        default='config/labels/semantic-kitti-OV.yaml',
+        default='config/labels/semantic-kitti.yaml',
         help='Classification yaml cfg file. See /config/labels for sample. No default!',
     )
     parser.add_argument(
