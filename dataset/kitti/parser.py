@@ -96,7 +96,7 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
-    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((1024, 384))])
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
