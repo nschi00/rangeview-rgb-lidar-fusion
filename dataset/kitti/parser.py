@@ -334,7 +334,8 @@ class Parser():
                gt=True,           # get gt?
                shuffle_train=True,
                overfit=False,
-               share_subset_train=1.0):  # shuffle training set?
+               share_subset_train=1.0,
+               share_subset_val=1.0):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -395,6 +396,11 @@ class Parser():
       assert overfit == False, "Overfit has to be turned off for training on subset."
       samples_step = np.rint(1 / share_subset_train).astype('int')
       self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, len(self.train_dataset), samples_step))
+
+    if share_subset_val < 1:
+      assert overfit == False, "Overfit has to be turned off for validation on subset."
+      samples_step = np.rint(1 / share_subset_val).astype('int')
+      self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, len(self.valid_dataset), samples_step))
 
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,

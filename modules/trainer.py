@@ -84,7 +84,8 @@ class Trainer():
                              gt=True,
                              shuffle_train=True,
                              overfit=self.ARCH["train"]["overfit"],
-                             share_subset_train=self.ARCH["train"]["share_subset_train"])
+                             share_subset_train=self.ARCH["train"]["share_subset_train"],
+                             share_subset_val=self.ARCH["train"]["share_subset_val"])
 
         # weights for loss (and bias)
 
@@ -209,6 +210,8 @@ class Trainer():
             #                                                     milestones=F_config["scheduler_milestones"],
             #                                                     gamma=F_config["scheduler_gamma"])
 
+            rest_params = self.model.parameters()
+
         else:
             rest_params = self.model.parameters()
 
@@ -218,7 +221,7 @@ class Trainer():
             self.clip_grad = ARCH["train"]["adamw"]["clip_grad"]
             self.optimizer = optim.AdamW(rest_params, lr=lr, weight_decay=w_decay)
         else:
-            self.optimizer = optim.SGD(list(rest_params)+list(fusion_params),
+            self.optimizer = optim.SGD(rest_params,
                                        lr=lr,  # min_lr
                                        momentum=momentum,
                                        weight_decay=self.ARCH["train"]["w_decay"])
@@ -476,7 +479,7 @@ class Trainer():
                 if self.ARCH["train"]["overfit"]:
                     jaccard, class_jaccard = evaluator.getIoUMissingClass()
                 else:
-                    jaccard, class_jaccard = evaluator.getIoU()
+                    jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -607,7 +610,7 @@ class Trainer():
                 end = time.time()
 
             accuracy = evaluator.getacc()
-            jaccard, class_jaccard = evaluator.getIoU()
+            jaccard, class_jaccard = evaluator.getIoUMissingClass()  ###TODO: Investigate change to getIoU
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 

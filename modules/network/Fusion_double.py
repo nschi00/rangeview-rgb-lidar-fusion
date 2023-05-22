@@ -93,14 +93,16 @@ class Fusion(nn.Module):
         if not use_att:
             self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
         else:
-            self.conv_before_fusion = BasicConv2d(640, 128, kernel_size=1, padding=0)
+            self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
+            self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
             upscale = 4
             window_size = 8
             height = (64 // upscale // window_size + 1) * window_size
             width = (512 // upscale // window_size + 1) * window_size
             self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
                         window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
-                        Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True)
+                        Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
+                        drop_path_rate=0.)
             # print(model)
             # print(height, width, model.flops() / 1e9)
 
@@ -170,8 +172,8 @@ class Fusion(nn.Module):
             out = torch.cat(x_lidar_features + x_rgb_features, dim=1)
             out = self.end_conv(out)
         else:
-            x_lidar_features = self.conv_before_fusion(torch.cat(list(x_lidar_features.values()), dim=1))
-            x_rgb_features = self.conv_before_fusion(torch.cat(list(x_rgb_features.values()), dim=1))
+            x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
+            x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
             out = self.fusion_layer(x_lidar_features, x_rgb_features)
 
         # """LATE FUSION"""
