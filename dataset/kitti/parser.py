@@ -283,6 +283,9 @@ class SemanticKitti(Dataset):
                       proj_remission, 
                       unproj_remissions, 
                       unproj_n_points]
+    
+    scan.project_lidar_into_image(rgb_data)
+
     # return
     return projected_data, rgb_data
 

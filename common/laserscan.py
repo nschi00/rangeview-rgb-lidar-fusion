@@ -71,6 +71,8 @@ class LaserScan:
         # reset just in case there was an open structure
         self.reset()
 
+        self.filename = filename
+
         # check filename is string
         if not isinstance(filename, str):
             raise TypeError("Filename should be string type, "
@@ -86,6 +88,7 @@ class LaserScan:
 
         # put in attribute
         points = scan[:, 0:3]  # get xyz
+        self.points_map_lidar2rgb = points
         remissions = scan[:, 3]  # get remission
         if self.drop_points is not False:
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
@@ -329,6 +332,37 @@ class LaserScan:
         normal_vector_camera[:, :, 1] = -normal_vector[:, :, 2]
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
+    
+    def project_lidar_into_image(self, rgb):
+        self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
+
+        # Open the file for reading
+        with open(self.filename, 'r') as file:
+            # Read the contents of the file
+            contents = file.read()
+
+        # Split the contents by lines and process each line
+        lines = contents.split('\n')
+        for line in lines:
+            line = line.strip()  # Remove leading/trailing whitespace
+            if line.startswith('P2:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                p2_matrix = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+            elif line.startswith('Tr:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                tr_matrix = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+
+        rot_vec, _ = cv2.Rodrigues(tr_matrix[0:3, 0:3])
+        t_vec = tr_matrix[0:3, 3]
+        proj_points_im, _ = cv2.projectPoints(self.points_map_lidar2rgb.astype('float64'), rot_vec, t_vec, p2_matrix[:, 0:3], np.array([]))
+        print(proj_points_im)
+
 
 class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
