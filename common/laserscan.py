@@ -7,6 +7,7 @@ import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
+from PIL import Image, ImageDraw
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -350,17 +351,39 @@ class LaserScan:
                 numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
 
                 # Reshape the list into a 3x4 matrix
-                p2_matrix = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+                P2 = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
             elif line.startswith('Tr:'):
                 numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
                 numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
 
                 # Reshape the list into a 3x4 matrix
-                tr_matrix = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+                Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
 
-        rot_vec, _ = cv2.Rodrigues(tr_matrix[0:3, 0:3])
-        t_vec = tr_matrix[0:3, 3]
-        proj_points_im, _ = cv2.projectPoints(self.points_map_lidar2rgb.astype('float64'), rot_vec, t_vec, p2_matrix[:, 0:3], np.array([]))
+        # trafo_matrix = np.zeros((4, 4))
+        # trafo_matrix[0:3, 0:3] = np.array(numbers[0:9]).reshape(3, 3)
+        # trafo_matrix[0:3, 3] = numbers[9:]
+        hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
+        # hom_points[:, 0:3] = self.points_map_lidar2rgb
+        hom_points[:, 0:3] = self.points_map_lidar2rgb
+        trans_points = (Tr @ hom_points.T).T
+        hom_points[:, 0:3] = trans_points
+        proj_points_im = (P2 @ hom_points.T).T
+        proj_points_im[:, 0] /= proj_points_im[:, 2]
+        proj_points_im[:, 1] /= proj_points_im[:, 2]
+        proj_points_im = proj_points_im[:, 0:2]
+        # trans_points = (trafo_matrix @ hom_points.T).T[:, 0:3]
+        # proj_points_im, _ = cv2.projectPoints(trans_points, np.zeros((3, 1)), np.zeros((3, 1)), p2_matrix[:, 0:3], np.array([]))
+        rgb_image = Image.fromarray(np.transpose((rgb.numpy()*255).astype('uint8'), (1, 2, 0)))
+        image_with_points = rgb_image.copy()
+
+        draw = ImageDraw.Draw(image_with_points)
+
+        # Draw the points on the image
+        for point in proj_points_im:
+            draw.point(point, fill="red")
+
+        # Save the modified image with the points
+        image_with_points.save("image_with_points.jpg")
         print(proj_points_im)
 
 
