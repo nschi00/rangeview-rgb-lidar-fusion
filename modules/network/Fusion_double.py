@@ -103,6 +103,9 @@ class Fusion(nn.Module):
                         window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
                         Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                         drop_path_rate=0.)
+            
+            self.end_conv = BasicConv2d(256, 128, kernel_size=1)
+            
             # print(model)
             # print(height, width, model.flops() / 1e9)
 
@@ -175,6 +178,7 @@ class Fusion(nn.Module):
             x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
             x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
             out = self.fusion_layer(x_lidar_features, x_rgb_features)
+            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         # """LATE FUSION"""
         # if not self.EARLY:

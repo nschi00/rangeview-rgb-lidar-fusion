@@ -367,7 +367,9 @@ class LaserScan:
         hom_points[:, 0:3] = self.points_map_lidar2rgb
         trans_points = (Tr @ hom_points.T).T
         hom_points[:, 0:3] = trans_points
-        proj_points_im = (P2 @ hom_points.T).T
+        mask = hom_points[:, 2] > 0  # Z >= 0
+
+        proj_points_im = (P2 @ hom_points[mask, :].T).T
         proj_points_im[:, 0] /= proj_points_im[:, 2]
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]

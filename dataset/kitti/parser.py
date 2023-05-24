@@ -96,8 +96,8 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
-    # self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
-    self.img_transform = TF.Compose([TF.ToTensor()])
+    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    # self.img_transform = TF.Compose([TF.ToTensor()])
     
     
     # get number of classes (can't be len(self.learning_map) because there
@@ -286,7 +286,7 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     
-    scan.project_lidar_into_image(rgb_data)
+    # scan.project_lidar_into_image(rgb_data)
 
     # return
     return projected_data, rgb_data

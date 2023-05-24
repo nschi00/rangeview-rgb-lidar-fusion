@@ -18,7 +18,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion_projection import Fusion
+from modules.network.Fusion_double import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
@@ -439,25 +439,25 @@ class Trainer():
                 proj_labels = proj_labels.cuda().long()
             rgb_data = rgb_data.cuda()
             # compute output
-            with torch.cuda.amp.autocast():
-                out = self.model(in_vol, rgb_data)
-                lamda = self.ARCH["train"]["lamda"]
-                if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
-                    out = [out]
+            # with torch.cuda.amp.autocast():
+            out = self.model(in_vol, rgb_data)
+            lamda = self.ARCH["train"]["lamda"]
+            if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
+                out = [out]
 
-                # SUM POSITION LOSSES
-                for j in range(len(out)):
-                    if j == 0:
-                        bdlosss = self.bd(out[j], proj_labels.long())
-                        loss_mn = self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
-                    else:
-                        bdlosss += lamda * self.bd(out[j], proj_labels.long())
-                        loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+            # SUM POSITION LOSSES
+            for j in range(len(out)):
+                if j == 0:
+                    bdlosss = self.bd(out[j], proj_labels.long())
+                    loss_mn = self.criterion(torch.log(out[j].clamp(
+                        min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                else:
+                    bdlosss += lamda * self.bd(out[j], proj_labels.long())
+                    loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
+                        min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
 
-                loss_m = loss_mn + bdlosss
-                output = out[0]
+            loss_m = loss_mn + bdlosss
+            output = out[0]
 
             # * Compute attention gradient if exsits
             self.optimizer.zero_grad()
