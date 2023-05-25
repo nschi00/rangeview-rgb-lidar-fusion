@@ -66,7 +66,7 @@ class Optim():
              {"params": rest_params}], **optimizer_cfg[optim_name])
         
         # * Set up scheduler if needed
-        if scheduler_cfg is not None and scheduler_cfg["Name"] is not "None":
+        if scheduler_cfg is not None and scheduler_cfg["Name"] != "None":
             name = scheduler_cfg["Name"]
             if name == "CosineAnnealingWarmupRestarts":
                 scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
