@@ -7,6 +7,7 @@ import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
+from PIL import Image, ImageDraw
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -65,11 +66,13 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename):
+    def open_scan(self, filename, only_lidar_front):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
         self.reset()
+
+        self.filename = filename
 
         # check filename is string
         if not isinstance(filename, str):
@@ -86,7 +89,18 @@ class LaserScan:
 
         # put in attribute
         points = scan[:, 0:3]  # get xyz
+
         remissions = scan[:, 3]  # get remission
+
+        self.mask_front = None
+
+        if only_lidar_front:
+            self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
+            points = points[self.mask_front]
+            remissions = remissions[self.mask_front]
+
+        self.points_map_lidar2rgb = points
+
         if self.drop_points is not False:
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
             points = np.delete(points,self.points_to_drop,axis=0)
@@ -329,6 +343,93 @@ class LaserScan:
         normal_vector_camera[:, :, 1] = -normal_vector[:, :, 2]
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
+    
+    def project_lidar_into_image(self, rgb):
+        self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
+
+        # Open the file for reading
+        with open(self.filename, 'r') as file:
+            # Read the contents of the file
+            contents = file.read()
+
+        # Split the contents by lines and process each line
+        lines = contents.split('\n')
+        for line in lines:
+            line = line.strip()  # Remove leading/trailing whitespace
+            if line.startswith('P2:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                P2 = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+            elif line.startswith('Tr:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+        
+        # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
+        hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
+        hom_points[:, 0:3] = self.points_map_lidar2rgb
+        trans_points = (Tr @ hom_points.T).T
+        hom_points[:, 0:3] = trans_points
+        proj_points_im = (P2 @ hom_points.T).T
+        proj_points_im[:, 0] /= proj_points_im[:, 2]
+        proj_points_im[:, 1] /= proj_points_im[:, 2]
+        proj_points_im = proj_points_im[:, 0:2]
+
+        rgb_image = Image.fromarray(np.transpose((rgb.numpy()*255).astype('uint8'), (1, 2, 0)))
+        image_with_points = rgb_image.copy()
+
+        draw = ImageDraw.Draw(image_with_points)
+
+        # Draw the points on the image
+        for point in proj_points_im:
+            draw.point(point, fill="red")
+
+        # Save the modified image with the points
+        image_with_points.save("image_with_points.jpg")
+
+    ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+    def hv_in_range(self, m, n, fov, fov_type='h'):
+        """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
+            horizontal limit = azimuth angle limit
+            vertical limit = elevation angle limit
+        """
+        if fov_type == 'h':
+            return np.logical_and(np.arctan2(n, m) > (-fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) < (-fov[0] * np.pi / 180))
+        elif fov_type == 'v':
+            return np.logical_and(np.arctan2(n, m) < (fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) > (fov[0] * np.pi / 180))
+        else:
+            raise NameError("fov type must be set between 'h' and 'v' ")
+        
+    def points_basic_filter(self, points, h_fov, v_fov):
+        """
+            filter points based on h,v FOV and x,y,z distance range.
+            x,y,z direction is based on velodyne coordinates
+            1. azimuth & elevation angle limit check
+            return a bool array
+        """
+        assert points.shape[1] == 3, points.shape # [N,3]
+        x, y, z = points[:, 0], points[:, 1], points[:, 2]
+        d = np.sqrt(x ** 2 + y ** 2 + z ** 2) # this is much faster than d = np.sqrt(np.power(points,2).sum(1))
+
+        # extract in-range fov points
+        h_points = self.hv_in_range(x, y, h_fov, fov_type='h')
+        v_points = self.hv_in_range(d, z, v_fov, fov_type='v')
+        combined = np.logical_and(h_points, v_points)
+
+        return combined
+
+    def extract_points(self):
+        # filter in range points based on fov, x,y,z range setting
+        combined = self.points_basic_filter(self.points)
+        points = self.points[combined]
+        label = self.sem_label[combined]
+
 
 class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
@@ -404,6 +505,8 @@ class SemLaserScan(LaserScan):
         # if all goes well, open label
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
+
+        label = label[self.mask_front] if self.mask_front is not None else label
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)

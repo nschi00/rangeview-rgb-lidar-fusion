@@ -44,6 +44,12 @@ fusion:                         # only relevant if pipeline == "fusion"
   branch_type: "panoptic"       # "semantic", "instance" or "panoptic"
   name_backbone: "mask2former"     # "resnet50" or "mask2former"
   stage: "combination"          # "enc", "pixel_decoder", "combination"
+  lr: 0.0002 # learning rate for cross attention fusion
+  w_decay: 0.0001
+  scheduler_gamma: 0.5
+  scheduler_milestones: [2000, 5000, 6000, 8000, 9000] # Currently for overfitting
+  only_lidar_front: True
+  rgb_resize: True
 
 ################################################################################
 # postproc parameters
