@@ -85,7 +85,9 @@ class Trainer():
                              gt=True,
                              shuffle_train=True,
                              overfit=self.ARCH["train"]["overfit"],
-                             share_subset_train=self.ARCH["train"]["share_subset_train"])
+                             share_subset_train=self.ARCH["train"]["share_subset_train"],
+                             only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
+                             warp_rgb_to_rv_size=self.ARCH["fusion"]["rgb_resize"])
 
         # weights for loss (and bias)
 
@@ -197,17 +199,14 @@ class Trainer():
         self.att_optimizer = None
         self.att_scheduler = None
         if F_config["use_att"]:
+            # * Disable use_att to train whole model
             fusion_params = self.model.fusion_layer.parameters()
             rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
-
             self.att_optimizer = optim.AdamW(fusion_params,
                                             lr=F_config["lr"],
                                             weight_decay=F_config["w_decay"])
 
-            # self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
-            #                                                     milestones=F_config["scheduler_milestones"],
-            #                                                     gamma=F_config["scheduler_gamma"])
-
+            rest_params = self.model.parameters()   #TODO: maybe reactivate separate optimizer for SwinFusion
         else:
             rest_params = self.model.parameters()
 
@@ -475,7 +474,7 @@ class Trainer():
                 if self.ARCH["train"]["overfit"]:
                     jaccard, class_jaccard = evaluator.getIoUMissingClass()
                 else:
-                    jaccard, class_jaccard = evaluator.getIoU()
+                    jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -606,7 +605,7 @@ class Trainer():
                 end = time.time()
 
             accuracy = evaluator.getacc()
-            jaccard, class_jaccard = evaluator.getIoU()
+            jaccard, class_jaccard = evaluator.getIoUMissingClass()  ###TODO: Investigate change to getIoU
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 
