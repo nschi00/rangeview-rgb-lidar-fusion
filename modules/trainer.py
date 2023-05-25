@@ -201,8 +201,8 @@ class Trainer():
         self.att_optimizer = None
         self.att_scheduler = None
         if F_config["use_att"]:
-            fusion_params = self.model.fusion_layer.parameters()
-            rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
+            # fusion_params = self.model.fusion_layer.parameters()
+            # rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
 
             # self.att_optimizer = optim.Adam(fusion_params,
             #                                 lr=F_config["lr"],
@@ -212,7 +212,7 @@ class Trainer():
             #                                                     milestones=F_config["scheduler_milestones"],
             #                                                     gamma=F_config["scheduler_gamma"])
 
-            rest_params = self.model.parameters()
+            rest_params = self.model.parameters()   #TODO: maybe reactivate separate optimizer for SwinFusion
 
         else:
             rest_params = self.model.parameters()
