@@ -8,6 +8,8 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.optim as optim
+
+from torch.optim.lr_scheduler import OneCycleLR
 from matplotlib import pyplot as plt
 from common.avgmeter import *
 from torch.utils.tensorboard import SummaryWriter
@@ -15,14 +17,16 @@ from common.sync_batchnorm.batchnorm import convert_model
 from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
-from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
+from modules.losses.boundary_loss import BoundaryLoss
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
+# pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
 from dataset.kitti.parser import Parser
-from modules.network.ResNet import ResNet_34, ResNet_tfbu
+from modules.network.ResNet import ResNet_34
 from modules.network.Fusion import Fusion, FusionDouble
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
-from modules.losses.boundary_loss import BoundaryLoss
+
 from collections import defaultdict
 
 def save_to_log(logdir, logfile, message):
@@ -44,7 +48,71 @@ def convert_relu_to_softplus(model, act):
         else:
             convert_relu_to_softplus(child, act)
 
+class Optim():
+    def __init__(self, model, optimizer_cfg, scheduler_cfg = None, iter_per_epoch = None):
+        optim_name = optimizer_cfg["Name"]
+        optimizer = eval("optim." + optim_name)
+        try:
+            fusion_params = model.fusion_layer.parameters()
+        except:
+            fusion_params = []
+        rest_params = [p for n, p in model.named_parameters() if "fusion_layer" not in n]
+        self.total_iter = iter_per_epoch * optimizer_cfg["max_epochs"]
+        # * F&B_mutiplier set to 1.0 will train all parameters with the same learning rate
+        self.optimizer = optimizer(
+            [{"params":fusion_params, "lr": optimizer_cfg[optim_name]["lr"] *
+                                            optimizer_cfg["F&B_mutiplier"]}, 
+             {"params": rest_params}], **optimizer_cfg[optim_name])
+        
+        # * Set up scheduler if needed
+        if scheduler_cfg is not None and scheduler_cfg["Name"] is not "None":
+            name = scheduler_cfg["Name"]
+            if name == "CosineAnnealingWarmupRestarts":
+                scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
+                scheduler_cfg[name]["first_cycle_steps"] = iter_per_epoch * scheduler_cfg[name]["first_cycle_steps"]
+                scheduler_cfg[name]["warmup_steps"] = iter_per_epoch * scheduler_cfg[name]["warmup_steps"]
+            elif name == "OneCycleLR":
+                scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
+                scheduler_cfg[name]["total_steps"] = self.total_iter
+            scheduler = eval(name)
+            self.scheduler = scheduler(self.optimizer, **scheduler_cfg[name])
+            self.scaler = torch.cuda.amp.GradScaler()
+        else:
+            # * If no scheduler is needed, set up a dummy scheduler
+            self.scheduler = optim.lr_scheduler.ConstantLR(self.optimizer, factor=1, total_iters=1)
 
+    def visualize(self):
+        import copy
+        optimizer_copy = copy.deepcopy(self.optimizer)
+        scheduler_copy = copy.deepcopy(self.scheduler)
+        lrs = []
+        for _ in range(self.total_iter):
+            optimizer_copy.step()
+            lrs.append(scheduler_copy.get_lr())
+            scheduler_copy.step()
+
+        plt.plot(lrs)
+        plt.show()
+        
+    def step(self, loss):
+        self.optimizer.zero_grad()
+        self.scaler.scale(loss).backward()
+        # if self.clip_grad is not None or self.clip_grad == 0:
+        #     torch.nn.utils.clip_grad_norm(self.model.parameters(), self.clip_grad)
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.scheduler.step()
+
+    def get_lr(self):
+        # * Fusion and backbone
+        fb_lr = self.optimizer.param_groups[0]["lr"]
+        rest_lr = self.optimizer.param_groups[1]["lr"]
+        return {"fb": fb_lr, "rest": rest_lr}
+    
+    def get_state_dict(self):
+        return {"optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict()}
+    
 class Trainer():
     def __init__(self, ARCH, DATA, datadir, logdir, path=None):
         # parameters
@@ -68,6 +136,7 @@ class Trainer():
                      "best_train_iou": 0,
                      "best_val_iou": 0}
 
+
         # get the data
         self.parser = Parser(root=self.datadir,
                              # DATA["split"]["valid"] + DATA["split"]["train"] if finetune with valid
@@ -84,10 +153,9 @@ class Trainer():
                              workers=self.ARCH["train"]["workers"],
                              gt=True,
                              shuffle_train=True,
-                             overfit=self.ARCH["train"]["overfit"],
-                             share_subset_train=self.ARCH["train"]["share_subset_train"],
+                             subset_ratio=self.ARCH["train"]["subset_ratio"],
                              only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
-                             warp_rgb_to_rv_size=self.ARCH["fusion"]["rgb_resize"])
+                             rgb_resize=self.ARCH["fusion"]["rgb_resize"])
 
         # weights for loss (and bias)
 
@@ -109,11 +177,10 @@ class Trainer():
         with torch.no_grad():
             activation = eval("nn." + self.ARCH["train"]["act"] + "()")
             if self.ARCH["train"]["pipeline"] == "res":
-                self.model = ResNet_tfbu(self.parser.get_n_classes(),
+                self.model = ResNet_34(self.parser.get_n_classes(),
                                        self.ARCH["train"]["aux_loss"])
                 convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                F_config = ARCH["fusion"]
                 # self.model = Fusion(nclasses=self.parser.get_n_classes(),
                 #                     aux=self.ARCH["train"]["aux_loss"],
                 #                     use_att=F_config["use_att"],
@@ -128,23 +195,13 @@ class Trainer():
                 self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
                                                       aux=self.ARCH["train"]["aux_loss"])
 
+        self.optim = Optim(self.model, ARCH["optimizer"], None, self.parser.get_train_size())
+        #self.optim.visualize()
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-
-        # if F_config["name_backbone"]:
-        #     print("{}_{}_{}_{}". format(F_config["name_backbone"],
-        #                                 "ca" if F_config["use_att"] else "conv",
-        #                                 F_config["fuse_all"],
-
-        #                                 "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        #     if F_config["name_backbone"] == "mask2former":
-        #         print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
-
-        #     print("Please verify your settings before continue.")
-        #     time.sleep(7)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -181,63 +238,6 @@ class Trainer():
                 self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
-        """
-        TODO: create different optimizers and schedulers for different part of the model
-        Example:
-        backbone can be retrained with a lower learning rate
-        main resnet model prefer cosine annealing with max lr = 0.01
-        swin fusion prefer adam with MULTISTEPLR (need to check document)
-        """
-
-        scheduler_type = self.ARCH["train"]["scheduler"]
-        scheduler_config = self.ARCH["train"][scheduler_type]
-        steps_per_epoch = self.parser.get_train_size()
-        lr = scheduler_config["lr"] if scheduler_type == "decay" else scheduler_config["min_lr"]
-        momentum = self.ARCH["train"]["momentum"]
-
-        # * Create Adam optimizer for cross attention fusion module
-        self.att_optimizer = None
-        self.att_scheduler = None
-        if F_config["use_att"]:
-            # * Disable use_att to train whole model
-            fusion_params = self.model.fusion_layer.parameters()
-            rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
-            self.att_optimizer = optim.AdamW(fusion_params,
-                                            lr=F_config["lr"],
-                                            weight_decay=F_config["w_decay"])
-
-            rest_params = self.model.parameters()   #TODO: maybe reactivate separate optimizer for SwinFusion
-        else:
-            rest_params = self.model.parameters()
-
-        if ARCH["train"]["pipeline"] == "m2f":
-            lr = ARCH["train"]["adamw"]["lr"]
-            w_decay = ARCH["train"]["w_decay"]
-            self.clip_grad = ARCH["train"]["adamw"]["clip_grad"]
-            self.optimizer = optim.AdamW(rest_params, lr=lr, weight_decay=w_decay)
-        else:
-            self.optimizer = optim.SGD(rest_params,
-                                       lr=lr,  # min_lr
-                                       momentum=momentum,
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-
-        if scheduler_type == "cosine":
-            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
-                                                           T_0=scheduler_config["first_cycle"] * steps_per_epoch,
-                                                           T_mult=scheduler_config["cycle"],  # cycle
-                                                           eta_max=scheduler_config["max_lr"],  # max_lr
-                                                           T_up=scheduler_config["wup_epochs"] * steps_per_epoch,
-                                                           gamma=scheduler_config["gamma"])  # gamma
-
-        elif scheduler_type == "decay":
-            up_steps = int(scheduler_config["wup_epochs"] * steps_per_epoch)  # wup_epochs
-            final_decay = scheduler_config["lr_decay"] ** (1 / steps_per_epoch)  # lr_decay
-            self.scheduler = warmupLR(optimizer=self.optimizer,
-                                      lr=lr,  # lr
-                                      warmup_steps=up_steps,
-                                      momentum=momentum,
-                                      decay=final_decay)
-
         if self.path is not None:
             torch.nn.Module.dump_patches = True
             assert "fusion" not in self.ARCH["train"]["pipeline"], "no pretrained for fusion"
@@ -250,16 +250,16 @@ class Trainer():
             else:
                 print("Loading model from: {}".format(path))
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-#             self.optimizer.load_state_dict(w_dict['optimizer'])
-#             self.epoch = w_dict['epoch'] + 1
-#             self.scheduler.load_state_dict(w_dict['scheduler'])
+            #             self.optimizer.load_state_dict(w_dict['optimizer'])
+            #             self.epoch = w_dict['epoch'] + 1
+            #             self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
-#             self.info = w_dict['info']
+            #             self.info = w_dict['info']
             print("info", w_dict['info'])
 
     def calculate_estimate(self, epoch, iter):
         steps_per_epoch = self.parser.get_train_size()
-        max_epochs = self.ARCH['train']['max_epochs']
+        max_epochs = self.ARCH['optimizer']['max_epochs']
         estimate = int((self.data_time_t.avg + self.batch_time_t.avg) * (steps_per_epoch * max_epochs - (iter + 1 +
                        epoch * steps_per_epoch))) + int(self.batch_time_e.avg * self.parser.get_valid_size() *
                                                         (max_epochs - (epoch)))
@@ -332,29 +332,29 @@ class Trainer():
                                                      save_scans=self.ARCH["train"]["save_scans"])
 
         # train for n epochs
-        for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):
+        for epoch in range(self.epoch, self.ARCH["optimizer"]["max_epochs"]):
             # train for 1 epoch
 
             acc, iou, loss = self.train_epoch(train_loader=self.parser.get_train_set(),
                                               epoch=epoch,
                                               evaluator=self.evaluator,
                                               color_fn=self.parser.to_color,
-                                              report=self.ARCH["train"]["report_batch"],
+                                              report=self.parser.get_train_size() // 10,
                                               show_scans=self.ARCH["train"]["show_scans"])
 
             # update info
             self.info["train_loss"] = loss
             self.info["train_acc"] = acc
             self.info["train_iou"] = iou
-            self.info["lr"] = self.optimizer.param_groups[0]["lr"]
-            self.info["att_lr"] = self.att_optimizer.param_groups[0]["lr"] if self.att_optimizer is not None else np.nan
+            self.info["lr"] = self.optim.get_lr()["rest"]
+            self.info["att_lr"] = self.optim.get_lr()["fb"]
 
             # remember best iou and save checkpoint
             # TODO: save attention optim and scheduler if necessary
             state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
-                     'optimizer': self.optimizer.state_dict(),
+                     'optimizer': self.optim.get_state_dict()["optimizer"],
                      'info': self.info,
-                     'scheduler': self.scheduler.state_dict()
+                     'scheduler': self.optim.get_state_dict()["scheduler"],
                      }
             save_checkpoint(state, self.log, suffix="_latest")
 
@@ -418,8 +418,6 @@ class Trainer():
         if self.gpu:
             torch.cuda.empty_cache()
 
-        scaler = torch.cuda.amp.GradScaler()
-
         # switch to train mode
         self.model.train()
 
@@ -454,15 +452,7 @@ class Trainer():
                 loss_m = loss_mn + bdlosss
                 output = out[0]
 
-            # * Compute attention gradient if exsits
-            self.optimizer.zero_grad()
-            self.att_optimizer.zero_grad() if self.att_optimizer is not None else None
-            scaler.scale(loss_m.sum()).backward()
-            # if self.clip_grad is not None or self.clip_grad == 0:
-            #     torch.nn.utils.clip_grad_norm(self.model.parameters(), self.clip_grad)
-            scaler.step(self.optimizer)
-            scaler.step(self.att_optimizer) if self.att_optimizer is not None else None
-            scaler.update()
+            self.optim.step(loss=loss_m)
 
             # measure accuracy and record loss
             loss = loss_m.mean()
@@ -484,14 +474,10 @@ class Trainer():
             # measure elapsed time
             self.batch_time_t.update(time.time() - end)
             end = time.time()
-            lr = self.optimizer.param_groups[0]["lr"]
+            lr = self.optim.get_lr()["rest"]
+            att_lr = self.optim.get_lr()["fb"]
             learning_rate.update(lr, 1)
-
-            if self.att_optimizer is not None:
-                att_lr = self.att_optimizer.param_groups[0]["lr"]
-                attention_lr.update(att_lr, 1)
-            else:
-                att_lr = np.nan
+            attention_lr.update(att_lr, 1)
 
             if show_scans:
                 if i % self.ARCH["train"]["save_batch"] == 0:
@@ -509,7 +495,7 @@ class Trainer():
                     name = os.path.join(directory, str(i) + ".png")
                     cv2.imwrite(name, out)
 
-            if i % self.ARCH["train"]["report_batch"] == 0:
+            if i % report == 0:
                 print('Lr: {lr:.3e} | '
                       'Att_lr: {att_lr:.0e} | '
                       'Epoch: [{0}][{1}/{2}] | '
@@ -536,9 +522,6 @@ class Trainer():
                                 data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
                                 att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
 
-            # * step scheduler
-            self.scheduler.step()
-            #self.att_scheduler.step() if self.att_scheduler is not None else None
 
         return acc.avg, iou.avg, losses.avg
 

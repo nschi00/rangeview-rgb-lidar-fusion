@@ -22,7 +22,7 @@ from third_party.Mask2Former.mask2former import config as m2f_config
 from third_party.Mask2Former.mask2former.modeling.matcher import HungarianMatcher
 from third_party.Mask2Former.mask2former.modeling.criterion import SetCriterion
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
-from image_processing_mask2former import Mask2FormerImageProcessor
+
 
 
 

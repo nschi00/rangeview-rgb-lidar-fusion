@@ -82,7 +82,7 @@ class Trainer():
                              gt=True,
                              shuffle_train=True,
                              overfit=self.ARCH["train"]["overfit"],
-                             share_subset_train=self.ARCH["train"]["share_subset_train"])
+                             subset_ratio=self.ARCH["train"]["subset_ratio"])
 
         # weights for loss (and bias)
 
@@ -199,7 +199,7 @@ class Trainer():
 
     def calculate_estimate(self, epoch, iter):
         steps_per_epoch = self.parser.get_train_size()
-        max_epochs = self.ARCH['train']['max_epochs']
+        max_epochs = self.ARCH['optimizer']['max_epochs']
         estimate = int((self.data_time_t.avg + self.batch_time_t.avg) * (steps_per_epoch * max_epochs - (iter + 1 +
                        epoch * steps_per_epoch))) + int(self.batch_time_e.avg * self.parser.get_valid_size() *
                                                         (max_epochs - (epoch)))
@@ -279,7 +279,7 @@ class Trainer():
                                               epoch=epoch,
                                               evaluator=self.evaluator,
                                               color_fn=self.parser.to_color,
-                                              report=self.ARCH["train"]["report_batch"],
+                                              report=self.parser.get_train_size() // 10,
                                               show_scans=self.ARCH["train"]["show_scans"])
 
             # update info
@@ -435,7 +435,7 @@ class Trainer():
                     name = os.path.join(directory, str(i) + ".png")
                     cv2.imwrite(name, out)
 
-            if i % self.ARCH["train"]["report_batch"] == 0:
+            if i % report == 0:
                 print('Lr: {lr:.3e} | '
                       'Att_lr: {att_lr:.0e} | '
                       'Epoch: [{0}][{1}/{2}] | '

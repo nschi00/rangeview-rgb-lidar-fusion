@@ -23,7 +23,6 @@ train:
   momentum: 0.9          # sgd momentum
   w_decay: 0.0001        # weight decay
   batch_size: 6          # batch size
-  report_batch: 100      # every x batches, report loss
   report_epoch: 1        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
   save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api

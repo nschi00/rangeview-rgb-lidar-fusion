@@ -6,26 +6,9 @@ train:
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
   aux_loss: True
-  overfit: False
-  share_subset_train: 1  # share of data used for training; overfit has to be false
+  subset_ratio: 1  # share of data used for training; overfit has to be false
   lamda: 1.0
-  scheduler: "cosine"  # "cosine" or "decay"
-  max_epochs: 5000
-  cosine:
-    min_lr: 0.0001
-    max_lr: 0.01
-    first_cycle: 50
-    cycle: 1
-    wup_epochs: 20
-    gamma: 0.95
-  decay:
-    lr: 0.01
-    wup_epochs: 1        # warmup during first XX epochs (can be float)
-    lr_decay: 0.99       # learning rate decay per epoch after initial cycle (from min lr)
-  momentum: 0.9          # sgd momentum
-  w_decay: 0.0001        # weight decay
   batch_size: 10          # batch size
-  report_batch: 100      # every x batches, report loss
   report_epoch: 1        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
   save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api
@@ -36,18 +19,57 @@ train:
   #TODO: Change it back to 4
 
 ################################################################################
+# optimizer parameters
+################################################################################
+optimizer:
+  Name: SGD # AdamW, SGD
+  max_epochs: 100
+  F&B_mutiplier: 1.0 # Whether to use reduce the learning rate for the backbone and fusion module
+  AdamW:
+    lr: 0.0001
+    weight_decay: 0.0001
+    momentum: 0.9
+    betas: [0.9, 0.999]
+    eps: 1e-08
+    amsgrad: False
+  SGD:
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0001
+    dampening: 0
+    nesterov: False
+scheduler:
+  Name: CosineAnnealingWarmupRestarts # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
+  CosineAnnealingWarmupRestarts:
+    first_cycle_steps : 50
+    warmup_steps : 1
+    cycle_mult : 1.
+    max_lr : 0.1
+    min_lr : 0.0001
+    gamma : 0.95
+  OneCycleLR: # Old decay with warmup and cosine annealing 
+    max_lr: 0.01 # Equal to optimizer.lr
+    total_steps: 1000 # Equal to max_epochs * iterations_per_epoch
+    pct_start: 0.01 # The percentage of the cycle (in number of steps) spent increasing the learning rate (warmup).
+  ReduceLROnPlateau: # NOT TUNED
+    mode: 'min'
+    factor: 0.1
+    patience: 10
+    verbose: False
+    threshold: 0.0001
+    threshold_mode: 'rel'
+    cooldown: 0
+    min_lr: 0
+    eps: 1e-08
+  
+################################################################################
 # fusion parameters
 ################################################################################
 fusion:                         # only relevant if pipeline == "fusion"
-  use_att: False                # whether to use cross-encoder or convolution for fusion
   fuse_all: "all_late"        # "all", "main_early" or "main_late"
   branch_type: "panoptic"       # "semantic", "instance" or "panoptic"
   name_backbone: "mask2former"     # "resnet50" or "mask2former"
   stage: "combination"          # "enc", "pixel_decoder", "combination"
-  lr: 0.0002 # learning rate for cross attention fusion
-  w_decay: 0.0001
-  scheduler_gamma: 0.5
-  scheduler_milestones: [2000, 5000, 6000, 8000, 9000] # Currently for overfitting
   only_lidar_front: True
   rgb_resize: True
 

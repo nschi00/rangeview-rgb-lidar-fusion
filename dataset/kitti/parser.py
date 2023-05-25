@@ -75,7 +75,7 @@ class SemanticKitti(Dataset):
                learning_map_inv,    # inverse of previous (recover labels)
                sensor,              # sensor to parse scans from
                only_lidar_front,
-               warp_rgb_to_rv_size,
+               rgb_resize,
                max_points=150000,   # max number of points present in dataset
                gt=True,
                transform=False):            # send ground truth?
@@ -100,7 +100,7 @@ class SemanticKitti(Dataset):
     self.only_lidar_front = only_lidar_front
     self.transform = transform
 
-    if warp_rgb_to_rv_size:
+    if rgb_resize:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
       self.img_transform = TF.Compose([TF.ToTensor()])
@@ -175,8 +175,8 @@ class SemanticKitti(Dataset):
 
   def __getitem__(self, index):
     # get item in tensor shape
-    scan_file = self.scan_files[index]
-    rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
+    scan_file = self.scan_files[index] 
+    rgb_data = self.img_transform(Image.open(self.rgb_files[index])) # 3 x H x W
 
     if self.gt:
       label_file = self.label_files[index]
@@ -342,11 +342,10 @@ class Parser():
                max_points,        # max points in each scan in entire dataset
                batch_size,        # batch size for train and val
                workers,           # threads to load data
-               warp_rgb_to_rv_size,
+               rgb_resize,
                gt=True,           # get gt?
                shuffle_train=True,
-               overfit=False,
-               share_subset_train=1.0,
+               subset_ratio=1.0,
                only_lidar_front=False):  # shuffle training set?
     super(Parser, self).__init__()
 
@@ -381,7 +380,7 @@ class Parser():
                                        transform=True,
                                        gt=self.gt,
                                        only_lidar_front=only_lidar_front,
-                                       warp_rgb_to_rv_size=warp_rgb_to_rv_size)
+                                       rgb_resize=rgb_resize)
     
     self.valid_dataset = SemanticKitti(root=self.root,
                                        sequences=self.valid_sequences,
@@ -393,7 +392,7 @@ class Parser():
                                        max_points=max_points,
                                        gt=self.gt,
                                        only_lidar_front=only_lidar_front,
-                                       warp_rgb_to_rv_size=warp_rgb_to_rv_size)
+                                       rgb_resize=rgb_resize)
 
 
     def seed_worker(worker_id):
@@ -402,15 +401,9 @@ class Parser():
         random.seed(worker_seed)
     g = torch.Generator()
     g.manual_seed(1024)
-    val_batch_size = 4 # !ONLY for PROTOTYPE
-    if overfit:
-      self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
-      self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
-      val_batch_size = self.batch_size
 
-    if share_subset_train < 1:
-      assert overfit == False, "Overfit has to be turned off for training on subset."
-      samples_step = np.rint(1 / share_subset_train).astype('int')
+    if subset_ratio < 1:
+      samples_step = np.rint(1 / subset_ratio).astype('int')
       self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, len(self.train_dataset), samples_step))
 
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
@@ -425,7 +418,7 @@ class Parser():
     
       
     self.validloader = torch.utils.data.DataLoader(self.valid_dataset,
-                                                   batch_size=val_batch_size,
+                                                   batch_size=self.batch_size,
                                                    shuffle=False,
                                                    num_workers=self.workers,
                                                    drop_last=True)

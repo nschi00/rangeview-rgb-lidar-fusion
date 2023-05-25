@@ -1,6 +1,9 @@
+import sys
+sys.path.append("modules")
 import torch.nn as nn
 import torch
 from torch.nn import functional as F
+from overfit_test import overfit_test
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -314,34 +317,5 @@ class ResNet_34BB(ResNet_34):
         return output
         
 if __name__ == "__main__":
-    import time
-    model = ResNet_tfbu(20).cuda()
-    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("Number of parameters: ", pytorch_total_params / 1000000, "M")
-    time_train = []
-    for i in range(20):
-        input_3D = torch.randn(2, 5, 64, 512).cuda()
-        input_rgb = torch.randn(2, 3, 452, 1032).cuda()
-        model.eval()
-        with torch.no_grad():
-            start_time = time.time()
-            outputs = model(input_3D, input_rgb)
-        torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
-        fwt = time.time() - start_time
-        time_train.append(fwt)
-        print("Forward time per img: %.3f (Mean: %.3f)" % (
-            fwt / 1, sum(time_train) / len(time_train) / 1))
-        time.sleep(0.15)
-
-    # for i in range(20):
-    #     inputs = torch.randn(1, 5, 64, 2048).cuda()
-    #     model.eval()
-    #     with torch.no_grad():
-    #       start_time = time.time()
-    #       outputs = model(inputs)
-    #     torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
-    #     fwt = time.time() - start_time
-    #     time_train.append(fwt)
-    #     print ("Forward time per img: %.3f (Mean: %.3f)" % (
-    #       fwt / 1, sum(time_train) / len(time_train) / 1))
-    #     time.sleep(0.15)
+    model = ResNet_34(20, True).cuda()
+    overfit_test(model, 6, False)
