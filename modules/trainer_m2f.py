@@ -17,13 +17,10 @@ from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
-from modules.network.ResNet import ResNet_34, ResNet_tfbu
-from modules.network.Fusion import Fusion, FusionDouble
-#from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
-from collections import defaultdict
+
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -103,46 +100,14 @@ class Trainer():
                 # don't weigh
                 self.loss_w[x_cl] = 0
         print("Loss weights from content: ", self.loss_w.data)
-        F_config = defaultdict(lambda: None)
         with torch.no_grad():
-            activation = eval("nn." + self.ARCH["train"]["act"] + "()")
-            if self.ARCH["train"]["pipeline"] == "res":
-                self.model = ResNet_tfbu(self.parser.get_n_classes(),
-                                       self.ARCH["train"]["aux_loss"])
-                convert_relu_to_softplus(self.model, activation)
-            elif self.ARCH["train"]["pipeline"] == "fusion":
-                F_config = ARCH["fusion"]
-                # self.model = Fusion(nclasses=self.parser.get_n_classes(),
-                #                     aux=self.ARCH["train"]["aux_loss"],
-                #                     use_att=F_config["use_att"],
-                #                     fusion_scale=F_config["fuse_all"],
-                #                     name_backbone=F_config["name_backbone"],
-                #                     branch_type=F_config["branch_type"],
-                #                     stage=F_config["stage"])
-                self.model = FusionDouble(nclasses=self.parser.get_n_classes())
-                convert_relu_to_softplus(self.model, activation)
-                #self.model = Fusion(self.parser.get_n_classes())
-            else:
-                self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
-                                                      aux=self.ARCH["train"]["aux_loss"])
-
+            self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
+                                                  l_weight=self.loss_w)
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-
-        # if F_config["name_backbone"]:
-        #     print("{}_{}_{}_{}". format(F_config["name_backbone"],
-        #                                 "ca" if F_config["use_att"] else "conv",
-        #                                 F_config["fuse_all"],
-
-        #                                 "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        #     if F_config["name_backbone"] == "mask2former":
-        #         print("{}_{}".format(F_config["branch_type"], F_config["stage"]))
-
-        #     print("Please verify your settings before continue.")
-        #     time.sleep(7)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -196,31 +161,9 @@ class Trainer():
         # * Create Adam optimizer for cross attention fusion module
         self.att_optimizer = None
         self.att_scheduler = None
-        if F_config["use_att"]:
-            fusion_params = self.model.fusion_layer.parameters()
-            rest_params = [p for n, p in self.model.named_parameters() if "fusion_layer" not in n]
-
-            self.att_optimizer = optim.AdamW(fusion_params,
-                                            lr=F_config["lr"],
-                                            weight_decay=F_config["w_decay"])
-
-            # self.att_scheduler = optim.lr_scheduler.MultiStepLR(self.att_optimizer,
-            #                                                     milestones=F_config["scheduler_milestones"],
-            #                                                     gamma=F_config["scheduler_gamma"])
-
-        else:
-            rest_params = self.model.parameters()
-
-        if ARCH["train"]["pipeline"] == "m2f":
-            lr = ARCH["train"]["adamw"]["lr"]
-            w_decay = ARCH["train"]["w_decay"]
-            self.clip_grad = ARCH["train"]["adamw"]["clip_grad"]
-            self.optimizer = optim.AdamW(rest_params, lr=lr, weight_decay=w_decay)
-        else:
-            self.optimizer = optim.SGD(rest_params,
-                                       lr=lr,  # min_lr
-                                       momentum=momentum,
-                                       weight_decay=self.ARCH["train"]["w_decay"])
+        self.optimizer = optim.AdamW(self.model.parameters(),
+                                    lr=0.005,  # min_lr
+                                    weight_decay=0.0001)
 
         if scheduler_type == "cosine":
             self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
@@ -251,11 +194,7 @@ class Trainer():
             else:
                 print("Loading model from: {}".format(path))
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-#             self.optimizer.load_state_dict(w_dict['optimizer'])
-#             self.epoch = w_dict['epoch'] + 1
-#             self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
-#             self.info = w_dict['info']
             print("info", w_dict['info'])
 
     def calculate_estimate(self, epoch, iter):
@@ -435,30 +374,16 @@ class Trainer():
                 proj_labels = proj_labels.cuda().long()
             rgb_data = rgb_data.cuda()
             # compute output
-            with torch.cuda.amp.autocast():
-                out = self.model(in_vol, rgb_data)
-                lamda = self.ARCH["train"]["lamda"]
-                if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
-                    out = [out]
-
-                # SUM POSITION LOSSES
-                for j in range(len(out)):
-                    if j == 0:
-                        bdlosss = self.bd(out[j], proj_labels.long())
-                        loss_mn = self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
-                    else:
-                        bdlosss += lamda * self.bd(out[j], proj_labels.long())
-                        loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
-
-                loss_m = loss_mn + 3 * bdlosss
-                output = out[0]
+            #with torch.cuda.amp.autocast():
+            out = self.model(in_vol, rgb_data, proj_labels)
+                
 
             # * Compute attention gradient if exsits
             self.optimizer.zero_grad()
-            self.att_optimizer.zero_grad() if self.att_optimizer is not None else None
-            scaler.scale(loss_m.sum()).backward()
+            loss = out.loss
+            scaler.scale(loss).backward()
+        
+            bdlosss = 0
             # if self.clip_grad is not None or self.clip_grad == 0:
             #     torch.nn.utils.clip_grad_norm(self.model.parameters(), self.clip_grad)
             scaler.step(self.optimizer)
@@ -466,10 +391,10 @@ class Trainer():
             scaler.update()
 
             # measure accuracy and record loss
-            loss = loss_m.mean()
+
             with torch.no_grad():
-                evaluator.reset()
-                argmax = output.argmax(dim=1)
+                argmax = self.model.seg_eval(out)
+                #argmax = self.model.eval_seg(out['pred_logits'], out['pred_masks'])
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
                 if self.ARCH["train"]["overfit"]:
@@ -480,7 +405,7 @@ class Trainer():
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
-            bd.update(bdlosss.item(), in_vol.size(0))
+            bd.update(bdlosss, in_vol.size(0))
 
             # measure elapsed time
             self.batch_time_t.update(time.time() - end)
@@ -538,14 +463,13 @@ class Trainer():
                                 att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
 
             # * step scheduler
-            self.scheduler.step()
+            #self.scheduler.step()
             #self.att_scheduler.step() if self.att_scheduler is not None else None
 
         return acc.avg, iou.avg, losses.avg
 
     def validate(self, val_loader, evaluator, class_func, color_fn, save_scans):
         losses = AverageMeter()
-        jaccs = AverageMeter()
         wces = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
@@ -570,23 +494,13 @@ class Trainer():
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
-                output = self.model(in_vol, rgb_data)
+                output = self.model(in_vol, rgb_data, proj_labels)
 
-                if type(output) is list:
-                    output = output[0]
-
-                log_out = torch.log(output.clamp(min=1e-8))
-                jacc = self.ls(output, proj_labels)
-                wce = self.criterion(log_out, proj_labels)
-                loss = wce + jacc
-
+                loss = output.loss
                 # measure accuracy and record loss
-                argmax = output.argmax(dim=1)
+                argmax = self.model.seg_eval(output)
                 evaluator.addBatch(argmax, proj_labels)
                 losses.update(loss.mean().item(), in_vol.size(0))
-                jaccs.update(jacc.mean().item(), in_vol.size(0))
-
-                wces.update(wce.mean().item(), in_vol.size(0))
 
                 if save_scans:
                     # get the first scan in batch and project points
@@ -613,25 +527,18 @@ class Trainer():
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
                   'Loss avg {loss.avg:.4f}\n'
-                  'Jaccard avg {jac.avg:.4f}\n'
-                  'WCE avg {wces.avg:.4f}\n'
                   'Acc avg {acc.avg:.3f}\n'
                   'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
                                                  loss=losses,
-                                                 jac=jaccs,
                                                  wces=wces,
                                                  acc=acc, iou=iou))
 
             save_to_log(self.log, 'log.txt', 'Validation set:\n'
                                              'Time avg per batch {batch_time.avg:.3f}\n'
                                              'Loss avg {loss.avg:.4f}\n'
-                                             'Jaccard avg {jac.avg:.4f}\n'
-                                             'WCE avg {wces.avg:.4f}\n'
                                              'Acc avg {acc.avg:.3f}\n'
                                              'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
                                                                             loss=losses,
-                                                                            jac=jaccs,
-                                                                            wces=wces,
                                                                             acc=acc, iou=iou))
             # print also classwise
             for i, jacc in enumerate(class_jaccard):

@@ -955,7 +955,9 @@ class PatchEmbed(nn.Module):
 
         self.in_chans = in_chans
         self.embed_dim = embed_dim
-
+        # if in_chans == embed_dim:
+        #     self.proj = nn.Identity()
+        # else:
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size,bias=False)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -1105,7 +1107,7 @@ class SwinFusion(nn.Module):
                  embed_dim=128, Ex_depths=[1, 1], Fusion_depths=[1, 1], Re_depths=[4],
                  Ex_num_heads=[8, 8], Fusion_num_heads=[8, 8], Re_num_heads=[6],
                  window_size=8, mlp_ratio=4., qkv_bias=True, qk_scale=None,
-                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, resi_connection='1conv',
                  **kwargs):

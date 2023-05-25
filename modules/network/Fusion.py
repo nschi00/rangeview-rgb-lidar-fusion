@@ -8,7 +8,8 @@ from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
 from third_party.SwinFusion.models.network_swinfusion import Cross_BasicLayer, PatchUnEmbed
 from ResNet import BasicBlock, BasicConv2d, conv1x1
-from torchvision.models.segmentation import deeplabv3_resnet50
+from torchvision.models import resnet50
+from torchvision.models._utils import IntermediateLayerGetter
 import torch
 import torch.nn as nn
 import numpy as np
@@ -41,7 +42,7 @@ class BackBone(nn.Module):
                  fuse_all=False,
                  branch_type="semantic",
                  stage="combination",
-                 in_size=(64, 512)):
+                 in_size=(384, 1024)):
         super().__init__()
         assert name in ["resnet50", "mask2former"], \
             "Backbone name must be either resnet50 or mask2former"
@@ -75,19 +76,39 @@ class BackBone(nn.Module):
             self.layer_list = []  # not necessary for combination
 
         if name == "resnet50":
-            hidden_dim = [2048] + [1024] * 3
-            self.layer_list = ["out"] + ["aux"] * 3
+            hidden_dim = [256, 512, 1024, 2048]
+            output_red = [2, 4, 8, 16]
+            input_red = [4, 8, 16, 32]
+            self.layer_list = ["feat1", "feat2", "feat3", "feat4"]
             self.processor = None
-            self.backbone = deeplabv3_resnet50(weights='DEFAULT').backbone
-
+            self.backbone = resnet50(weights="ResNet50_Weights.IMAGENET1K_V2")
+            assert fuse_all == True, "ResNet50 only supports fuse_all=True"
+            self.backbone = IntermediateLayerGetter(self.backbone, return_layers={'layer1': 'feat1', 'layer2': 'feat2', 'layer3': 'feat3', 'layer4': 'feat4'})
+            # test_input = torch.randn(1, 3, in_size[0], in_size[1])
+            # test_output = self.backbone(test_input)
+            # for p in self.backbone.parameters():
+            #     p.requires_grad = False
+            # for n, p in self.backbone.named_children():
+            #     #last_layer = 0
+            #     for n_, p_ in p.named_children():
+            #         continue
+            #         # if int(n_) > last_layer:
+            #         #     last_layer = int(n_)
+            #     if "layer" in n:
+            #         for param in p_.parameters():
+            #             param.requires_grad = True
+            #     #print(n, last_layer)
+            #     #p.requires_grad = True
+            # pytorch_total_params = sum(p.numel()
+            #                    for p in self.backbone.parameters() if p.requires_grad)
+            # print(self.backbone)
+            # print(pytorch_total_params)
             if fuse_all:
-                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[i],
-                                                                  128, (8, 16),
-                                                                  get_smaller(in_size, output_res[i]))
-                                                     for i in range(3)])
-                self.upscale_layers.append(BasicConv2d(hidden_dim[3], 128, 1))
-            else:
-                self.upscale_layers = nn.ModuleList([Upscale_head(hidden_dim[0], 128, (8, 16), in_size)])
+                self.upscale_layers = nn.ModuleList(
+                    [Upscale_head(hidden_dim[i], 128, 
+                                  get_smaller(in_size, input_red[i]), 
+                                  get_smaller(in_size, output_red[i]))
+                                for i in range(4)])
 
         elif name == "mask2former":
             weight = "facebook/mask2former-swin-tiny-cityscapes-{}".format(
@@ -190,9 +211,11 @@ class FusionDouble(nn.Module):
 
         self.unet_layers_lidar = nn.ModuleList()
         self.unet_layers_rgb = nn.ModuleList()
+        self.resi_convs = nn.ModuleList()
         for i, j in enumerate([1, 2, 2, 2]):
             self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
+            self.resi_convs.append(BasicConv2d(256, 128, kernel_size=1, padding=0))
 
         self.end_conv_lidar = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
                                             BasicConv2d(256, 128, kernel_size=3, padding=1))
@@ -201,7 +224,7 @@ class FusionDouble(nn.Module):
                                           BasicConv2d(256, 128, kernel_size=3, padding=1))
 
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
-
+        
         """FUSION LAYERS"""
         # ! Redefine for different resolutions
         project_size = np.array([64, 512])  
@@ -265,7 +288,10 @@ class FusionDouble(nn.Module):
         for i in range(0, 4):
             x_lidar_features[str(i + 1)] = self.unet_layers_lidar[i](x_lidar_features[str(i)])
             x_rgb_features[str(i + 1)] = self.unet_layers_rgb[i](x_rgb_features[str(i)])
-            x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)] = self.fusion_layer[i](x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)])
+            lidar_fused, rgb_fused = self.fusion_layer[i](x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)])
+            x_lidar_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_lidar_features[str(i + 1)], lidar_fused], dim=1))
+            x_rgb_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_rgb_features[str(i + 1)], rgb_fused], dim=1))
+            
         for i in range(2, 5):
             x_lidar_features[str(i)] = F.interpolate(
                 x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
@@ -299,7 +325,7 @@ class Fusion(nn.Module):
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
                  norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='main_late',
-                 name_backbone="mask2former", branch_type="semantic", stage="combination"):
+                 name_backbone="resnet50", branch_type="semantic", stage="combination"):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
@@ -352,7 +378,7 @@ class Fusion(nn.Module):
         if not use_att:
             self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
         else:
-            self.fusion_layer = Cross_SW_Attention()
+            self.fusion_layer = Cross_Attention()
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -461,8 +487,98 @@ class Upscale_head(nn.Module):
             x_inter, size=self.size_out, mode='bilinear', align_corners=True))
         x_out = self.relu(self.bn2(x_out))
         return x_out
+    
+class PatchEmbed(nn.Module):
+    """Image to Patch Embedding
+    Args:
+        patch_size (int): Patch token size. Default: 4.
+        in_chans (int): Number of input image channels. Default: 3.
+        embed_dim (int): Number of linear projection output channels. Default: 96.
+        norm_layer (nn.Module, optional): Normalization layer. Default: None
+    """
 
+    def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=nn.LayerNorm):
+        super().__init__()
+        patch_size = to_2tuple(patch_size)
+        self.patch_size = patch_size
 
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size,bias=False)
+        if norm_layer is not None:
+            self.norm = norm_layer(embed_dim)
+        else:
+            self.norm = None
+
+    def forward(self, x):
+        """Forward function."""
+        # padding
+        _, _, H, W = x.size()
+        if W % self.patch_size[1] != 0:
+            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
+        if H % self.patch_size[0] != 0:
+            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
+
+        x = self.proj(x)  # B C Wh Ww
+        if self.norm is not None:
+            Wh, Ww = x.size(2), x.size(3)
+            x = x.flatten(2).transpose(1, 2)
+            x = self.norm(x)
+            x = x.view(-1, self.embed_dim, Wh, Ww)
+
+        return x
+    
+    def flops(self):
+        flops = 0
+        H, W = self.img_size
+        if self.norm is not None:
+            flops += H * W * self.embed_dim
+        return flops
+    
+class Cross_Attention(nn.Module):
+    def __init__(self, A_size, B_size, A_patchs, B_patchs, depth, hidden_dim=128, n_head=8) -> None:
+        super().__init__()
+        to_2tuple(A_patchs)
+        to_2tuple(B_patchs)
+        to_2tuple(A_size)
+        to_2tuple(B_size)
+        self.hidden_dim = hidden_dim
+        self.patch_embed_A = PatchEmbed(patch_size=A_patchs, in_chans=128, embed_dim=hidden_dim)
+        self.patch_embed_B = PatchEmbed(patch_size=B_patchs, in_chans=128, embed_dim=hidden_dim)
+        self.patch_unembed = PatchUnEmbed(patch_size=A_patchs, in_chans=128, embed_dim=hidden_dim)
+        self.A_size = A_size
+        self.B_size = B_size
+        
+        self.A_reso = (int(A_size[0]/A_patchs[0]), int(A_size[1]/A_patchs[1]))
+        self.B_reso = (int(B_size[0]/B_patchs[0]), int(B_size[1]/B_patchs[1]))
+        
+        self.A_pe = nn.Parameter(torch.zeros(1, hidden_dim, self.A_reso[0], self.A_reso[1]))
+        trunc_normal_(self.A_pe, std=.02)
+        self.B_proj = nn.Sequential(nn.Conv2d(hidden_dim, hidden_dim, 1, padding=0, bias=False), 
+                                    nn.LeakyReLU(inplace=True))
+        
+        self.decoder = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=n_head, batch_first=True)
+        assert self.A_reso == self.B_reso, "Resolution of A and B must be the same"
+        
+    
+    def forward(self, A, B):
+        # TODO: Delete this later, only for testing
+        #B = torch.transpose(B, 2, 3)
+        A = self.patch_embed_A(A)
+        B = self.patch_embed_B(B)
+        #h_A, w_A = self.A_reso
+        assert A.shape[2:] == self.A_reso, "A resolution must be the same as the patch resolution"
+        assert B.shape[2:] == self.B_reso, "B resolution must be the same as the patch resolution"
+        
+        A = A + self.A_pe
+        B = B + self.B_proj(self.A_pe)
+        A = A.view(-1, self.A_reso[0]*self.A_reso[1], self.hidden_dim)
+        B = B.view(-1, self.B_reso[0]*self.B_reso[1], self.hidden_dim)
+        out = self.decoder(A, B, B)
+        return out
+        
+
+    
 def get_n_params(model):
     pytorch_total_params = sum(p.numel()
                                for p in model.parameters() if p.requires_grad)
@@ -471,6 +587,8 @@ def get_n_params(model):
 
 if __name__ == "__main__":
     import time
+    #model = Fusion(20).cuda()
+    #model = Cross_Attention((64, 512), (48, 128), (4, 4), (3, 1), 4, hidden_dim=96, n_head=6).cuda()
     model = FusionDouble(20).cuda()
     print(model)
     total = 0
@@ -490,7 +608,7 @@ if __name__ == "__main__":
     time_train = []
     for i in range(20):
         input_3D = torch.rand(2, 5, 64, 512).cuda()
-        input_rgb = torch.rand(2, 3, 512*2, 192*2).cuda()
+        input_rgb = torch.rand(2, 3, 48, 128).cuda()
         model.eval()
         with torch.no_grad():
             start_time = time.time()

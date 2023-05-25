@@ -279,9 +279,11 @@ class ResNet_34(nn.Module):
         if self.aux:
             return [out, res_2, res_3, res_4]
         else:
-            return out
+            return out        
 
-    def feature_extractor(self, x):
+class ResNet_34BB(ResNet_34):
+    def forward(self,pixel_values, output_hidden_states=False):
+        x  = pixel_values
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
@@ -300,8 +302,17 @@ class ResNet_34(nn.Module):
         out = self.conv_1(out)
         out = self.conv_2(out)
 
-        return [out, x_2, x_3, x_4]
+        class Output():
+            pass
+            
+        output = Output()
+        setattr(output, 'decoder_last_hidden_state', out)
+        setattr(output, 'decoder_hidden_states', [x_2, x_3, x_4])
+        setattr(output, 'encoder_last_hidden_state', None)
+        setattr(output, 'encoder_hidden_states', None)
 
+        return output
+        
 if __name__ == "__main__":
     import time
     model = ResNet_tfbu(20).cuda()
