@@ -57,6 +57,7 @@ class Optim():
         except:
             fusion_params = []
         rest_params = [p for n, p in model.named_parameters() if "fusion_layer" not in n]
+        self.scaler = torch.cuda.amp.GradScaler()
         self.total_iter = iter_per_epoch * optimizer_cfg["max_epochs"]
         # * F&B_mutiplier set to 1.0 will train all parameters with the same learning rate
         self.optimizer = optimizer(
@@ -76,10 +77,10 @@ class Optim():
                 scheduler_cfg[name]["total_steps"] = self.total_iter
             scheduler = eval(name)
             self.scheduler = scheduler(self.optimizer, **scheduler_cfg[name])
-            self.scaler = torch.cuda.amp.GradScaler()
         else:
             # * If no scheduler is needed, set up a dummy scheduler
             self.scheduler = optim.lr_scheduler.ConstantLR(self.optimizer, factor=1, total_iters=1)
+        
 
     def visualize(self):
         import copy
@@ -201,7 +202,6 @@ class Trainer():
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
-        print("Overfitting samples: ", self.ARCH["train"]["overfit"])
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
@@ -461,10 +461,7 @@ class Trainer():
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
-                if self.ARCH["train"]["overfit"]:
-                    jaccard, class_jaccard = evaluator.getIoUMissingClass()
-                else:
-                    jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
+                jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
