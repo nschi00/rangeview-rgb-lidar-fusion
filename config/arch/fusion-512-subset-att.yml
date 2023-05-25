@@ -6,8 +6,8 @@ train:
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
   aux_loss: False
-  overfit: False
-  share_subset_train: 0.25  # share of data used for training; overfit has to be false
+  overfit: True
+  share_subset_train: 1  # share of data used for training; overfit has to be false
   share_subset_val: 1
   lamda: 1.0
   scheduler: "decay" # "cosine" or "decay"
@@ -51,7 +51,8 @@ fusion: # only relevant if pipeline == "fusion"
   w_decay: 0.0001
   scheduler_gamma: 0.5
   scheduler_milestones: [20, 50, 60, 80, 90] # Currently for overfitting
-
+  only_lidar_front: True
+  warp_rgb_size: True
 
 ################################################################################
 # postproc parameters

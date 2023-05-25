@@ -18,7 +18,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion_double import Fusion
+from modules.network.Fusion_projection import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from modules.losses.boundary_loss import BoundaryLoss
@@ -85,7 +85,9 @@ class Trainer():
                              shuffle_train=True,
                              overfit=self.ARCH["train"]["overfit"],
                              share_subset_train=self.ARCH["train"]["share_subset_train"],
-                             share_subset_val=self.ARCH["train"]["share_subset_val"])
+                             share_subset_val=self.ARCH["train"]["share_subset_val"],
+                             only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
+                             warp_rgb_to_rv_size=self.ARCH["fusion"]["warp_rgb_size"])
 
         # weights for loss (and bias)
 

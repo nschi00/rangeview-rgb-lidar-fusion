@@ -66,7 +66,7 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename):
+    def open_scan(self, filename, only_lidar_front):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
@@ -89,8 +89,18 @@ class LaserScan:
 
         # put in attribute
         points = scan[:, 0:3]  # get xyz
-        self.points_map_lidar2rgb = points
+
         remissions = scan[:, 3]  # get remission
+
+        self.mask_front = np.ones(points.shape[0])
+
+        if only_lidar_front:
+            self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
+            points = points[self.mask_front]
+            remissions = remissions[self.mask_front]
+
+        self.points_map_lidar2rgb = points
+
         if self.drop_points is not False:
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
             points = np.delete(points,self.points_to_drop,axis=0)
@@ -358,23 +368,17 @@ class LaserScan:
 
                 # Reshape the list into a 3x4 matrix
                 Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
-
-        # trafo_matrix = np.zeros((4, 4))
-        # trafo_matrix[0:3, 0:3] = np.array(numbers[0:9]).reshape(3, 3)
-        # trafo_matrix[0:3, 3] = numbers[9:]
+        
+        # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
         hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
-        # hom_points[:, 0:3] = self.points_map_lidar2rgb
         hom_points[:, 0:3] = self.points_map_lidar2rgb
         trans_points = (Tr @ hom_points.T).T
         hom_points[:, 0:3] = trans_points
-        mask = hom_points[:, 2] > 0  # Z >= 0
-
-        proj_points_im = (P2 @ hom_points[mask, :].T).T
+        proj_points_im = (P2 @ hom_points.T).T
         proj_points_im[:, 0] /= proj_points_im[:, 2]
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]
-        # trans_points = (trafo_matrix @ hom_points.T).T[:, 0:3]
-        # proj_points_im, _ = cv2.projectPoints(trans_points, np.zeros((3, 1)), np.zeros((3, 1)), p2_matrix[:, 0:3], np.array([]))
+
         rgb_image = Image.fromarray(np.transpose((rgb.numpy()*255).astype('uint8'), (1, 2, 0)))
         image_with_points = rgb_image.copy()
 
@@ -386,7 +390,45 @@ class LaserScan:
 
         # Save the modified image with the points
         image_with_points.save("image_with_points.jpg")
-        print(proj_points_im)
+
+    ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+    def hv_in_range(self, m, n, fov, fov_type='h'):
+        """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
+            horizontal limit = azimuth angle limit
+            vertical limit = elevation angle limit
+        """
+        if fov_type == 'h':
+            return np.logical_and(np.arctan2(n, m) > (-fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) < (-fov[0] * np.pi / 180))
+        elif fov_type == 'v':
+            return np.logical_and(np.arctan2(n, m) < (fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) > (fov[0] * np.pi / 180))
+        else:
+            raise NameError("fov type must be set between 'h' and 'v' ")
+        
+    def points_basic_filter(self, points, h_fov, v_fov):
+        """
+            filter points based on h,v FOV and x,y,z distance range.
+            x,y,z direction is based on velodyne coordinates
+            1. azimuth & elevation angle limit check
+            return a bool array
+        """
+        assert points.shape[1] == 3, points.shape # [N,3]
+        x, y, z = points[:, 0], points[:, 1], points[:, 2]
+        d = np.sqrt(x ** 2 + y ** 2 + z ** 2) # this is much faster than d = np.sqrt(np.power(points,2).sum(1))
+
+        # extract in-range fov points
+        h_points = self.hv_in_range(x, y, h_fov, fov_type='h')
+        v_points = self.hv_in_range(d, z, v_fov, fov_type='v')
+        combined = np.logical_and(h_points, v_points)
+
+        return combined
+
+    def extract_points(self):
+        # filter in range points based on fov, x,y,z range setting
+        combined = self.points_basic_filter(self.points)
+        points = self.points[combined]
+        label = self.sem_label[combined]
 
 
 class SemLaserScan(LaserScan):
@@ -463,6 +505,8 @@ class SemLaserScan(LaserScan):
         # if all goes well, open label
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
+
+        label = label[self.mask_front]
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)

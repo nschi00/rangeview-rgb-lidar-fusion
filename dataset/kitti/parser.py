@@ -74,6 +74,8 @@ class SemanticKitti(Dataset):
                learning_map,  # classes to learn (0 to N-1 for xentropy)
                learning_map_inv,    # inverse of previous (recover labels)
                sensor,              # sensor to parse scans from
+               only_lidar_front,
+               warp_rgb_to_rv_size,
                max_points=150000,   # max number of points present in dataset
                gt=True,
                transform=False):            # send ground truth?
@@ -95,9 +97,13 @@ class SemanticKitti(Dataset):
     self.sensor_fov_down = sensor["fov_down"]
     self.max_points = max_points
     self.gt = gt
+    self.only_lidar_front = only_lidar_front
     self.transform = transform
-    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
-    # self.img_transform = TF.Compose([TF.ToTensor()])
+
+    if warp_rgb_to_rv_size:
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    else:
+      self.img_transform = TF.Compose([TF.ToTensor()])
     
     
     # get number of classes (can't be len(self.learning_map) because there
@@ -213,7 +219,7 @@ class SemanticKitti(Dataset):
                        drop_points=drop_points)
 
     # open and obtain scan
-    scan.open_scan(scan_file)
+    scan.open_scan(scan_file, self.only_lidar_front)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -286,7 +292,7 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     
-    # scan.project_lidar_into_image(rgb_data)
+    # scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
 
     # return
     return projected_data, rgb_data
@@ -336,11 +342,13 @@ class Parser():
                max_points,        # max points in each scan in entire dataset
                batch_size,        # batch size for train and val
                workers,           # threads to load data
+               warp_rgb_to_rv_size,
                gt=True,           # get gt?
                shuffle_train=True,
                overfit=False,
                share_subset_train=1.0,
-               share_subset_val=1.0):  # shuffle training set?
+               share_subset_val=1.0,
+               only_lidar_front=False):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -372,7 +380,9 @@ class Parser():
                                        sensor=self.sensor,
                                        max_points=max_points,
                                        transform=True,
-                                       gt=self.gt)
+                                       gt=self.gt,
+                                       only_lidar_front=only_lidar_front,
+                                       warp_rgb_to_rv_size=warp_rgb_to_rv_size)
     
     self.valid_dataset = SemanticKitti(root=self.root,
                                        sequences=self.valid_sequences,
@@ -382,7 +392,9 @@ class Parser():
                                        learning_map_inv=self.learning_map_inv,
                                        sensor=self.sensor,
                                        max_points=max_points,
-                                       gt=self.gt)
+                                       gt=self.gt,
+                                       only_lidar_front=only_lidar_front,
+                                       warp_rgb_to_rv_size=warp_rgb_to_rv_size)
 
 
     def seed_worker(worker_id):
