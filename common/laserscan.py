@@ -92,7 +92,7 @@ class LaserScan:
 
         remissions = scan[:, 3]  # get remission
 
-        self.mask_front = np.ones(points.shape[0])
+        self.mask_front = None
 
         if only_lidar_front:
             self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
@@ -506,7 +506,7 @@ class SemLaserScan(LaserScan):
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
 
-        label = label[self.mask_front]
+        label = label[self.mask_front] if self.mask_front is not None else label
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)
