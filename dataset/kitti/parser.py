@@ -104,7 +104,7 @@ class SemanticKitti(Dataset):
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
       self.img_transform = TF.Compose([TF.ToTensor()])
-    
+
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -402,7 +402,7 @@ class Parser():
         random.seed(worker_seed)
     g = torch.Generator()
     g.manual_seed(1024)
-    val_batch_size = 12 if self.batch_size < 12 else self.batch_size
+    val_batch_size = 4 # !ONLY for PROTOTYPE
     if overfit:
       self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
       self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
