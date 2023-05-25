@@ -8,7 +8,6 @@ train:
   aux_loss: True
   overfit: False
   share_subset_train: 1  # share of data used for training; overfit has to be false
-  share_subset_val: 1
   lamda: 1.0
   scheduler: "cosine"  # "cosine" or "decay"
   max_epochs: 100
@@ -50,7 +49,7 @@ fusion:                         # only relevant if pipeline == "fusion"
   scheduler_gamma: 0.5
   scheduler_milestones: [2000, 5000, 6000, 8000, 9000] # Currently for overfitting
   only_lidar_front: True
-  warp_rgb_size: True
+  rgb_resize: True
 
 ################################################################################
 # postproc parameters
