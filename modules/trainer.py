@@ -451,7 +451,7 @@ class Trainer():
                         loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
                             min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
 
-                loss_m = loss_mn + 3 * bdlosss
+                loss_m = loss_mn + bdlosss
                 output = out[0]
 
             # * Compute attention gradient if exsits
