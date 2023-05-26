@@ -22,7 +22,8 @@ from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 # pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion import Fusion, FusionDouble
+# from modules.network.Fusion import Fusion, FusionDouble
+from modules.network.Fusion_double import Fusion
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
@@ -182,14 +183,14 @@ class Trainer():
                                        self.ARCH["train"]["aux_loss"])
                 convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                # self.model = Fusion(nclasses=self.parser.get_n_classes(),
-                #                     aux=self.ARCH["train"]["aux_loss"],
-                #                     use_att=F_config["use_att"],
-                #                     fusion_scale=F_config["fuse_all"],
-                #                     name_backbone=F_config["name_backbone"],
-                #                     branch_type=F_config["branch_type"],
-                #                     stage=F_config["stage"])
-                self.model = FusionDouble(nclasses=self.parser.get_n_classes())
+                self.model = Fusion(nclasses=self.parser.get_n_classes(),
+                                    aux=self.ARCH["train"]["aux_loss"],
+                                    fusion_scale=self.ARCH["fusion"]["fuse_all"],
+                                    name_backbone=self.ARCH["fusion"]["name_backbone"],
+                                    branch_type=self.ARCH["fusion"]["branch_type"],
+                                    stage=self.ARCH["fusion"]["stage"],
+                                    use_att=True)
+                # self.model = FusionDouble(nclasses=self.parser.get_n_classes())
                 convert_relu_to_softplus(self.model, activation)
                 #self.model = Fusion(self.parser.get_n_classes())
             else:

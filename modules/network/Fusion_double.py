@@ -178,7 +178,7 @@ class Fusion(nn.Module):
             x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
             x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
             out = self.fusion_layer(x_lidar_features, x_rgb_features)
-            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
+            # out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         # """LATE FUSION"""
         # if not self.EARLY:
@@ -191,11 +191,11 @@ class Fusion(nn.Module):
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 
-        if self.aux:
-            out = [out]
-            for i in range(2, 5):
-                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
-                out[-1] = F.softmax(out[-1], dim=1)
+        # if self.aux:
+        #     out = [out]
+        #     for i in range(2, 5):
+        #         out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
+        #         out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
