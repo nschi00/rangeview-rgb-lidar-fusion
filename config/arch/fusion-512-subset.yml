@@ -5,8 +5,8 @@ train:
   pipeline: "fusion" #  "res" "fid" "hard"
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
-  aux_loss: True
-  subset_ratio: 0.25  # share of data used for training; overfit has to be false
+  aux_loss: False
+  subset_ratio: 0.005  # share of data used for training; overfit has to be false
   lamda: 1.0
   batch_size: 1 # batch size
   report_epoch: 1 # every x epochs, report validation set
@@ -39,7 +39,7 @@ optimizer:
     dampening: 0
     nesterov: False
 scheduler:
-  Name: CosineAnnealingWarmupRestarts # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
+  Name: OneCycleLR # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
   CosineAnnealingWarmupRestarts:
     first_cycle_steps : 50
     warmup_steps : 1

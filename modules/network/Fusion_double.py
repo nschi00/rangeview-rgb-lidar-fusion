@@ -30,7 +30,7 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='main_late',
+                 norm_layer=None, groups=1, width_per_group=64, use_att=True, fusion_scale='main_late',
                  name_backbone="mask2former", branch_type="semantic", stage="combination"):
 
         super(Fusion, self).__init__()
@@ -78,9 +78,9 @@ class Fusion(nn.Module):
         for i, j in enumerate([1, 2, 2, 2]):
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
 
-        self.end_conv = nn.Sequential(BasicConv2d(1280, 640, kernel_size=3, padding=1),
-                                    BasicConv2d(640, 256, kernel_size=3, padding=1),
-                                    BasicConv2d(256, 128, kernel_size=3, padding=1))
+        # self.end_conv = nn.Sequential(BasicConv2d(1280, 640, kernel_size=3, padding=1),
+        #                             BasicConv2d(640, 256, kernel_size=3, padding=1),
+        #                             BasicConv2d(256, 128, kernel_size=3, padding=1))
 
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
@@ -191,11 +191,11 @@ class Fusion(nn.Module):
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 
-        # if self.aux:
-        #     out = [out]
-        #     for i in range(2, 5):
-        #         out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
-        #         out[-1] = F.softmax(out[-1], dim=1)
+        if self.aux:
+            out = [out]
+            for i in range(2, 5):
+                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
+                out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
