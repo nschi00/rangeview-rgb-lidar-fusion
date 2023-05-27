@@ -95,9 +95,7 @@ class LaserScan:
         self.mask_front = None
 
         if only_lidar_front:
-            self.fov_hor = [-40, 40]
-            self.fov_vert = [-14, 5]
-            self.mask_front = self.points_basic_filter(points, self.fov_hor, self.fov_vert)
+            self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
             points = points[self.mask_front]
             remissions = remissions[self.mask_front]
 
@@ -261,13 +259,8 @@ class LaserScan:
         pitch = np.arcsin(scan_z / depth)
 
         # get projections in image coords
-        if self.mask_front is not None:
-            fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
-            proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
-            proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
-        else:
-            proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
-            proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
+        proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+        proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
