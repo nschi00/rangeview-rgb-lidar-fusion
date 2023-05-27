@@ -30,26 +30,11 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_att=False, fusion_scale='main_late',
-                 name_backbone="mask2former", branch_type="semantic", stage="combination"):
+                 norm_layer=None, groups=1, width_per_group=64):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-
-        assert fusion_scale in ["all_early", "all_late", "main_late", "main_early"]
-        if use_att:
-            assert fusion_scale in ["main_early", "main_late"]
-        # if fusion_scale == "main_late":
-        #     assert aux == False
-        # * whether to fuse all scales or only main scales
-        self.ALL = "all" in fusion_scale
-        # * whether to fuse early or late
-        self.EARLY = "early" in fusion_scale
-        self.use_att = use_att
-
-        # self.backbone = BackBone(name=name_backbone, use_att=use_att,
-        #                          fuse_all=self.ALL, stage=stage, branch_type=branch_type)
 
         """BASEMODEL"""
         self._norm_layer = norm_layer
@@ -78,10 +63,6 @@ class Fusion(nn.Module):
         for i, j in enumerate([1, 2, 2, 2]):
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
 
-        self.end_conv = nn.Sequential(BasicConv2d(1280, 640, kernel_size=3, padding=1),
-                                    BasicConv2d(640, 256, kernel_size=3, padding=1),
-                                    BasicConv2d(256, 128, kernel_size=3, padding=1))
-
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
         if self.aux:
@@ -90,24 +71,18 @@ class Fusion(nn.Module):
                 self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
-        if not use_att:
-            self.fusion_layer = BasicConv2d(256, 128, kernel_size=1, padding=0)
-        else:
-            self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
-            self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
-            upscale = 4
-            window_size = 8
-            height = (64 // upscale // window_size + 1) * window_size
-            width = (512 // upscale // window_size + 1) * window_size
-            self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
-                        window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
-                        Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
-                        drop_path_rate=0.)
-            
-            self.end_conv = BasicConv2d(256, 128, kernel_size=1)
-            
-            # print(model)
-            # print(height, width, model.flops() / 1e9)
+        self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
+        self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
+        upscale = 4
+        window_size = 8
+        height = (64 // upscale // window_size + 1) * window_size
+        width = (512 // upscale // window_size + 1) * window_size
+        self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
+                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
+                    Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
+                    drop_path_rate=0.)
+        
+        self.end_conv = BasicConv2d(256, 128, kernel_size=1)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -169,33 +144,19 @@ class Fusion(nn.Module):
             x_rgb_features[str(i)] = F.interpolate(
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
-        if not self.use_att:
-            x_lidar_features = list(x_lidar_features.values())
-            x_rgb_features = list(x_rgb_features.values())
-            out = torch.cat(x_lidar_features + x_rgb_features, dim=1)
-            out = self.end_conv(out)
-        else:
-            x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
-            x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
-            out = self.fusion_layer(x_lidar_features, x_rgb_features)
-            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
-
-        # """LATE FUSION"""
-        # if not self.EARLY:
-        #     out = self.fusion_layer((out, rgb_out[0]))
-        #     # ! Size reduction due to patch size: patch_size = 1 can be heavy to calculate
-        #     if out.shape != rgb_out[0].shape:
-        #         out = F.interpolate(
-        #             out, size=rgb_out[0].shape[2:], mode='bilinear', align_corners=True)
+        x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
+        x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
+        out = self.fusion_layer(x_lidar_features, x_rgb_features)
+        # out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 
-        if self.aux:
-            out = [out]
-            for i in range(2, 5):
-                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
-                out[-1] = F.softmax(out[-1], dim=1)
+        # if self.aux:
+        #     out = [out]
+        #     for i in range(2, 5):
+        #         out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
+        #         out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
@@ -292,7 +253,7 @@ class SwinFusion(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
-        num_patches = 32768  ###TODO: change to image size multiplication
+        num_patches = int(32768 / 4)  ###TODO: change to image size multiplication
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
@@ -304,7 +265,7 @@ class SwinFusion(nn.Module):
 
         # absolute position embedding
         if self.ape: 
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))   ##TODO: Adapt to batch size and image size
+            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
             trunc_normal_(self.absolute_pos_embed, std=.02)
 
         self.pos_drop = nn.Dropout(p=drop_rate)

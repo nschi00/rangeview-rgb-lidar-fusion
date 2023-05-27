@@ -18,8 +18,8 @@ import numbers
 import types
 from collections.abc import Sequence, Iterable
 import warnings
-
-
+import cv2
+from matplotlib import pyplot as plt
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -36,6 +36,14 @@ def is_label(filename):
 
 def is_rgb(filename):
   return any(filename.endswith(ext) for ext in EXTENSIONS_RGB)
+
+def get_mpl_colormap(cmap_name):
+      cmap = plt.get_cmap(cmap_name)
+      # Initialize the matplotlib color map
+      sm = plt.cm.ScalarMappable(cmap=cmap)
+      # Obtain linear color range
+      color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+      return color_range.reshape(256, 1, 3)
 
 
 def my_collate(batch):
@@ -104,7 +112,6 @@ class SemanticKitti(Dataset):
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
       self.img_transform = TF.Compose([TF.ToTensor()])
-
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -186,15 +193,15 @@ class SemanticKitti(Dataset):
     flip_sign = False
     rot = False
     drop_points = False
-    if self.transform:
-        if random.random() > 0.5:
-            if random.random() > 0.5:
-                DA = True
-            if random.random() > 0.5:
-                flip_sign = True
-            if random.random() > 0.5:
-                rot = True
-            drop_points = random.uniform(0, 0.5)
+    # if self.transform:
+    #     if random.random() > 0.5:
+    #         if random.random() > 0.5:
+    #             DA = True
+    #         if random.random() > 0.5:
+    #             flip_sign = True
+    #         if random.random() > 0.5:
+    #             rot = True
+    #         drop_points = random.uniform(0, 0.5)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -277,6 +284,29 @@ class SemanticKitti(Dataset):
     path_split = path_norm.split(os.sep)
     path_seq = path_split[-3]
     path_name = path_split[-1].replace(".bin", ".label")
+
+    # if self.only_lidar_front:  
+    #   mask_np = proj_mask.cpu().numpy()
+    #   depth_np = proj[0].cpu().numpy()
+
+    #   depth = (cv2.normalize(depth_np, None, alpha=0, beta=1,
+    #                            norm_type=cv2.NORM_MINMAX,
+    #                            dtype=cv2.CV_32F) * 255.0).astype(np.uint8)
+    #   out_img = cv2.applyColorMap(
+    #         depth, get_mpl_colormap('viridis')) * mask_np[..., None]
+      
+    #   name = "Test.png"
+    #   cv2.imwrite(name, out_img)
+      
+    #   name = "Resized.png"
+
+    #   # put label in original values
+    #   label = SemanticKitti.map(proj_labels, self.learning_map_inv)
+    #   # put label in color
+    #   colormap = SemanticKitti.map(label, self.color_map)
+    #   cv2.imwrite(name, colormap)
+
+
     projected_data = [proj, 
                       proj_mask, 
                       proj_labels, 
@@ -292,7 +322,7 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     
-    # scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
+    scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
 
     # return
     return projected_data, rgb_data
