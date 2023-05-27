@@ -15,7 +15,7 @@ train:
   save_scans:  False     # False doesn't save anything, True saves som
   show_scans: True       # show scans during training
   save_batch: 50
-  workers: 0            # number of threads to get data 
+  workers: 4            # number of threads to get data 
   #TODO: Change it back to 4
 
 ################################################################################
@@ -102,7 +102,7 @@ dataset:
     fov_up: 3
     fov_down: -25
     img_prop:
-      width: 512
+      width: 128
       height: 64
     img_means: #range,x,y,z,signal
       - 11.71279
