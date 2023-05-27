@@ -2,13 +2,16 @@ import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
-
+sys.path.append("modules")
+from overfit_test import overfit_test
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
 from third_party.SwinFusion.models.network_swinfusion1 import RSTB, CRSTB, PatchUnEmbed, PatchEmbed, Upsample, UpsampleOneStep
 from ResNet import BasicBlock, BasicConv2d, conv1x1
 import torch
 import torch.nn as nn
+
+
 
 
 """ This is a torch way of getting the intermediate layers
@@ -178,7 +181,7 @@ class Fusion(nn.Module):
             x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
             x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
             out = self.fusion_layer(x_lidar_features, x_rgb_features)
-            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
+            # out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         # """LATE FUSION"""
         # if not self.EARLY:
@@ -491,29 +494,5 @@ class SwinFusion(nn.Module):
 
 
 if __name__ == "__main__":
-    import time
-    model = Fusion(20, use_att=False, fusion_scale="main_late").cuda()
-    print(model)
-
-    pytorch_total_params = sum(p.numel()
-                               for p in model.parameters() if p.requires_grad)
-    print("Number of parameters: ", pytorch_total_params / 1000000, "M")
-
-    # for module_name, module in model.named_parameters():
-    #     if "fusion" in module_name:
-    #         print(module_name, module)
-
-    time_train = []
-    for i in range(20):
-        input_3D = torch.rand(2, 5, 64, 512).cuda()
-        input_rgb = torch.rand(2, 3, 64, 512).cuda()
-        model.eval()
-        with torch.no_grad():
-            start_time = time.time()
-            outputs = model(input_3D, input_rgb)
-        torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
-        fwt = time.time() - start_time
-        time_train.append(fwt)
-        print("Forward time per img: %.3f (Mean: %.3f)" % (
-            fwt / 1, sum(time_train) / len(time_train) / 1))
-        time.sleep(0.15)
+    model = Fusion(20, False ,use_att=True).cuda()
+    overfit_test(model, 2, True)

@@ -29,8 +29,9 @@ def overfit_test(model, batchsize, rgb=False):
         if rgb == False:
             out = model(input_3D, label)
         else:
-            out = model(input_3D, input_rgb, label)
-        
+            out = model(input_3D, input_rgb)
+        if type(out) != list:
+            out = [out]
         for j in range(len(out)):
             if j == 0:
                 bdlosss = bd(out[j], label.long())

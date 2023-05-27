@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import Dataset
 from common.laserscan import LaserScan, SemLaserScan
 import torchvision.transforms as TF
-
+import copy
 import torch
 import math
 import random
@@ -18,8 +18,8 @@ import numbers
 import types
 from collections.abc import Sequence, Iterable
 import warnings
-
-
+from matplotlib import pyplot as plt
+import pandas as pd
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -175,11 +175,22 @@ class SemanticKitti(Dataset):
 
   def __getitem__(self, index):
     # get item in tensor shape
-    scan_file = self.scan_files[index] 
+    scan_file = self.scan_files[index]
     rgb_data = self.img_transform(Image.open(self.rgb_files[index])) # 3 x H x W
 
     if self.gt:
       label_file = self.label_files[index]
+      index_next = index + 1
+      next_file = self.scan_files[index_next]
+      split_scan = scan_file.split("/")
+      next_scan = next_file.split("/")
+      # * Test whether the next scan is from the same sequence
+      if split_scan[-3] != next_scan[-3]: 
+        index_next = index - 1
+      del split_scan
+      del next_scan
+      next_file = self.scan_files[index_next]
+      label_file_next = self.label_files[index_next]
 
     # open a semantic laserscan
     DA = False
@@ -194,7 +205,7 @@ class SemanticKitti(Dataset):
                 flip_sign = True
             if random.random() > 0.5:
                 rot = True
-            drop_points = random.uniform(0, 0.5)
+            drop_points = random.uniform(0, 0.2)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -207,6 +218,8 @@ class SemanticKitti(Dataset):
                           flip_sign=flip_sign,
                           rot=rot,
                           drop_points=drop_points)
+      
+      scan_next = copy.deepcopy(scan)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
@@ -225,8 +238,47 @@ class SemanticKitti(Dataset):
       # map unused classes to used classes (also for projection)
       scan.sem_label = self.map(scan.sem_label, self.learning_map)
       scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
+      
+      scan_next.open_scan(next_file, self.only_lidar_front)
+      scan_next.open_label(label_file_next)
+      scan_next.sem_label = self.map(scan_next.sem_label, self.learning_map)
+      scan_next.proj_sem_label = self.map(scan_next.proj_sem_label, self.learning_map)
+      projected_data = self.prepare_output(scan, scan_file)
+      projected_data_next = self.prepare_output(scan_next, next_file)
+      projected_data = self.RangePaste(projected_data, projected_data_next)
+      projected_data = self.RangeUnion(projected_data, projected_data_next)
+      return projected_data, rgb_data
+      
+    projected_data = self.prepare_output(scan, scan_file)
+    # return
+    return projected_data, rgb_data
 
-    # make a tensor of the uncompressed data (with the max num points)
+  def RangeUnion(self, output, output_next, k_union=0.5):
+    proj, proj_mask, proj_labels = output[0:3]
+    proj_next, proj_mask_next, proj_labels_next = output_next[0:3]
+    void = proj_mask <= 0
+    mask_temp = torch.rand(void.shape) <= k_union
+    # * Only fill 50% of the void points
+    void = void.logical_and(mask_temp)
+    proj[:, void], proj_labels[void] = proj_next[:, void], proj_labels_next[void]
+    proj_mask[void] = proj_mask_next[void]
+    output[0:3] = [proj, proj_mask, proj_labels]
+    return output
+
+  def RangePaste(self, output, output_next, tail_classes=None):
+    proj, proj_mask, proj_labels = output[0:3]
+    proj_next, proj_mask_next, proj_labels_next = output_next[0:3]
+    if tail_classes is None:
+      tail_classes = [ 2,  3,  4,  5,  6,  7,  8, 12, 16, 18, 19]
+    for tail_class in tail_classes:
+      pix = proj_labels_next == tail_class
+      proj[:, pix] = proj_next[:, pix]
+      proj_mask[pix] = proj_mask_next[pix]
+      proj_labels[pix] = proj_labels_next[pix]
+    
+    return output
+
+  def prepare_output(self, scan, scan_file):
     unproj_n_points = scan.points.shape[0]
     unproj_xyz = torch.full((self.max_points, 3), -1.0, dtype=torch.float)
     unproj_xyz[:unproj_n_points] = torch.from_numpy(scan.points)
@@ -292,11 +344,8 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     
-    # scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
-
-    # return
-    return projected_data, rgb_data
-
+    return projected_data
+    
   def __len__(self):
     return len(self.scan_files)
 
@@ -496,3 +545,49 @@ class Parser():
     label = SemanticKitti.map(label, self.learning_map_inv)
     # put label in color
     return SemanticKitti.map(label, self.color_map)
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  ######### TEMP FOR VISUALIZATION #########
+  # proj_prev, proj_mask_prev, proj_labels_prev = self.prepare_output(scan)
+    # proj_next, proj_mask_next, proj_labels_next = self.prepare_output(scan_next)
+    # projected_data = self.RangeUnion(self.prepare_output(scan), self.prepare_output(scan_next))
+    # del scan_next, scan
+    # label = SemanticKitti.map(proj_labels, self.learning_map_inv)
+    # label = SemanticKitti.map(label, self.color_map)
+    
+    # label_pre = SemanticKitti.map(proj_labels_prev, self.learning_map_inv)
+    # label_pre = SemanticKitti.map(label_pre, self.color_map)
+    
+    # label_next = SemanticKitti.map(proj_labels_next, self.learning_map_inv)
+    # label_next = SemanticKitti.map(label_next, self.color_map)
+    
+    # fig, axs = plt.subplots(3, 1)
+
+    # Display the top image
+    # axs[0].imshow(label_pre)
+    # axs[0].axis('off')
+    
+    # axs[2].imshow(label)
+    # axs[2].axis('off')
+
+    # # Display the bottom image
+    # axs[1].imshow(label_next)
+    # axs[1].axis('off')
+
+    # # Adjust spacing between subplots
+    # plt.subplots_adjust(hspace=0.1)
+
+    # # Show the plot
+    # plt.show()
+
+  
