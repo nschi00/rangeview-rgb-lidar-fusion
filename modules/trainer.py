@@ -202,6 +202,9 @@ class Trainer():
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params / 1000000, "M")
+        print("Optimizer: ", self.optim.optimizer)
+        print("Scheduler: ", self.optim.scheduler)
+        print("Number of workers: ", self.ARCH["train"]["workers"])
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
