@@ -11,5 +11,3 @@ __pycache__/
 third_party/*
 best_pretrained/*
 train.py
-config/arch/fusion-512-OV.yml
-config/arch/*
