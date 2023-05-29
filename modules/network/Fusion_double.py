@@ -246,7 +246,8 @@ class SwinFusion(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
-        num_patches = int(32768 / 4)  ###TODO: change to image size multiplication
+        # num_patches = int(32768 / 4)  ###TODO: change to image size multiplication
+        num_patches = 12288
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 

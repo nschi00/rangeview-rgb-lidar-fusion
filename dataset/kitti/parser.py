@@ -112,6 +112,8 @@ class SemanticKitti(Dataset):
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
       self.img_transform = TF.Compose([TF.ToTensor()])
+
+    self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -193,15 +195,16 @@ class SemanticKitti(Dataset):
     flip_sign = False
     rot = False
     drop_points = False
-    # if self.transform:
-    #     if random.random() > 0.5:
-    #         if random.random() > 0.5:
-    #             DA = True
-    #         if random.random() > 0.5:
-    #             flip_sign = True
-    #         if random.random() > 0.5:
-    #             rot = True
-    #         drop_points = random.uniform(0, 0.5)
+    if self.transform:
+        if random.random() > 0.5:
+            # if random.random() > 0.5:
+            #     DA = True
+            if random.random() > 0.5:
+                flip_sign = True
+                rgb_data = self.rgb_transform_random(rgb_data)
+            # if random.random() > 0.5:
+            #     rot = True
+            drop_points = random.uniform(0, 0.5)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -285,26 +288,26 @@ class SemanticKitti(Dataset):
     path_seq = path_split[-3]
     path_name = path_split[-1].replace(".bin", ".label")
 
-    # if self.only_lidar_front:  
-    #   mask_np = proj_mask.cpu().numpy()
-    #   depth_np = proj[0].cpu().numpy()
+    if self.only_lidar_front:  
+      mask_np = proj_mask.cpu().numpy()
+      depth_np = proj[0].cpu().numpy()
 
-    #   depth = (cv2.normalize(depth_np, None, alpha=0, beta=1,
-    #                            norm_type=cv2.NORM_MINMAX,
-    #                            dtype=cv2.CV_32F) * 255.0).astype(np.uint8)
-    #   out_img = cv2.applyColorMap(
-    #         depth, get_mpl_colormap('viridis')) * mask_np[..., None]
+      depth = (cv2.normalize(depth_np, None, alpha=0, beta=1,
+                               norm_type=cv2.NORM_MINMAX,
+                               dtype=cv2.CV_32F) * 255.0).astype(np.uint8)
+      out_img = cv2.applyColorMap(
+            depth, get_mpl_colormap('viridis')) * mask_np[..., None]
       
-    #   name = "Test.png"
-    #   cv2.imwrite(name, out_img)
+      name = "Test.png"
+      cv2.imwrite(name, out_img)
       
-    #   name = "Resized.png"
+      name = "Resized.png"
 
-    #   # put label in original values
-    #   label = SemanticKitti.map(proj_labels, self.learning_map_inv)
-    #   # put label in color
-    #   colormap = SemanticKitti.map(label, self.color_map)
-    #   cv2.imwrite(name, colormap)
+      # put label in original values
+      label = SemanticKitti.map(proj_labels, self.learning_map_inv)
+      # put label in color
+      colormap = SemanticKitti.map(label, self.color_map)
+      cv2.imwrite(name, colormap)
 
 
     projected_data = [proj, 
