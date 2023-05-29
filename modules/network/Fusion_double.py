@@ -130,14 +130,7 @@ class Fusion(nn.Module):
         for i in range(0, 4):
             x_lidar_features[str(i + 1)] = self.unet_layers_lidar[i](x_lidar_features[str(i)])
             x_rgb_features[str(i + 1)] = self.unet_layers_rgb[i](x_rgb_features[str(i)])
-            # if self.EARLY and i == 0:
-            #     x_features[str(i + 1)] = self.fusion_layer((x_features[str(i + 1)], rgb_out[i]))
-            #     continue
 
-            # if self.ALL:
-            #     x_features[str(i + 1)] = self.fusion_layer((x_features[str(i + 1)], rgb_out[i]))
-
-        # TODO: consider implement "all" early fusion for cross attention: very F***ing expensive
         for i in range(2, 5):
             x_lidar_features[str(i)] = F.interpolate(
                 x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
@@ -147,7 +140,7 @@ class Fusion(nn.Module):
         x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
         x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
         out = self.fusion_layer(x_lidar_features, x_rgb_features)
-        # out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
+        out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
