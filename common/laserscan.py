@@ -66,7 +66,7 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename, only_lidar_front):
+    def open_scan(self, filename, only_lidar_front, division_angle=None):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
@@ -94,18 +94,16 @@ class LaserScan:
 
         self.mask_front = None
 
-        if only_lidar_front:
-            self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
-            points = points[self.mask_front]
-            remissions = remissions[self.mask_front]
-
+        # if only_lidar_front:
+        #     self.mask_front = self.points_basic_filter(points, [-40, 40], [-14, 30])
+        #     points = points[self.mask_front]
+        #     remissions = remissions[self.mask_front]
+        self.division_angle = division_angle
         self.points_map_lidar2rgb = points
-
+        
         if self.drop_points is not False:
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
-            points = np.delete(points,self.points_to_drop,axis=0)
-            remissions = np.delete(remissions,self.points_to_drop)
-
+        
         self.set_points(points, remissions)
 
     def set_points(self, points, remissions=None):
@@ -146,6 +144,16 @@ class LaserScan:
         else:
             self.remissions = np.zeros((points.shape[0]), dtype=np.float32)
 
+        fov_mask = self.points_basic_filter(points, self.division_angle[0], [-90, 90])
+        fov_mask = np.where(fov_mask == 0)[0]
+        
+        if self.drop_points is not False:
+            self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, fov_mask)))
+        else:
+            self.points_to_drop = fov_mask
+            
+        self.points = np.delete(self.points,self.points_to_drop,axis=0)
+        self.remissions = np.delete(self.remissions,self.points_to_drop)
         # if projection is wanted, then do it and fill in the structure
         if self.project:
             self.do_range_projection()
@@ -259,9 +267,13 @@ class LaserScan:
         pitch = np.arcsin(scan_z / depth)
 
         # get projections in image coords
-        proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+        # proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
         proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
-
+        #self.fov_vert = [-14, 5]
+        #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
+        proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
+        #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
+        
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
         proj_y *= self.proj_H  # in [0.0, H]
@@ -508,8 +520,7 @@ class SemLaserScan(LaserScan):
 
         label = label[self.mask_front] if self.mask_front is not None else label
 
-        if self.drop_points is not False:
-            label = np.delete(label,self.points_to_drop)
+        label = np.delete(label,self.points_to_drop)
         # set it
         self.set_label(label)
 

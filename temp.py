@@ -52,3 +52,53 @@ for i in range(20000):
     print("Accuracy: ", accuracy.item())
     print("IoU: ", jaccard.item())
 
+# def visualize(self, img_list: list):
+#     plot_length = len(img_list)
+#     for i, img in enumerate(img_list):
+#       if img.shape[0] == 3:
+#         img_list[i] = img.permute(1, 2, 0)
+#       else:
+#         print(img.max(), img.min())
+#         # img_list[i] = self.map(img, self.learning_map_inv)
+#         # img_list[i] = self.map(img_list[i], self.color_map)
+#       # if max(img) != 255 and min(img) != 0:
+#       #   img_list[i] = self.map(img, self.learning_map_inv)
+#       #   img_list[i] = self.map(img_list[i], self.color_map)
+#       # elif type(img) == torch.Tensor:
+#       #   img_list[i] = img.permute(1, 2, 0).numpy().astype(np.uint8) * 255.0
+    
+    
+#     fig, axs = plt.subplots(plot_length, 1)
+#     for i in range(plot_length):
+#       axs[i].imshow(img_list[i])
+#       axs[i].axis('off')
+      
+#     # Adjust spacing between subplots
+#     plt.subplots_adjust(hspace=0.1)
+
+#     # Show the plot
+#     plt.show()
+    
+# def get_division_angles(self, division):
+#         # Calculate the angle per division
+#         angle_per_division = 360.0 / division
+
+#         # Calculate the start angle for the first division
+#         first_start_angle = -angle_per_division / 2.0
+#         first_end_angle = angle_per_division / 2.0
+
+#         # Create a list to store the start and end angles for each division
+#         division_angles = [(first_start_angle, first_end_angle)]
+
+#         # Calculate the start and end angles for the remaining divisions
+#         for i in range(1, division):
+#             start_angle = division_angles[i-1][1]
+#             if start_angle < 0.0:
+#                 end_angle = start_angle - angle_per_division
+#             else:
+#                 end_angle = start_angle + angle_per_division
+#             if end_angle > 180.0:
+#                 end_angle -= 360.0
+#             division_angles.append((start_angle, end_angle))
+
+#         return division_angles

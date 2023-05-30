@@ -78,7 +78,8 @@ class SemanticKitti(Dataset):
                rgb_resize,
                max_points=150000,   # max number of points present in dataset
                gt=True,
-               transform=False):            # send ground truth?
+               transform=False,
+               division=4):            # send ground truth?
     # save deats
     self.root = os.path.join(root, "sequences")
     self.sequences = sequences
@@ -99,7 +100,9 @@ class SemanticKitti(Dataset):
     self.gt = gt
     self.only_lidar_front = only_lidar_front
     self.transform = transform
-
+    self.sensor_img_W = round((self.sensor_img_W // division) / 64) * 64
+    self.division = division
+    self.img_flip = TF.RandomHorizontalFlip(p=1.0)
     if rgb_resize:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
@@ -203,9 +206,10 @@ class SemanticKitti(Dataset):
                 DA = True
             if random.random() > 0.5:
                 flip_sign = True
+                rgb_data = self.img_flip(rgb_data)
             if random.random() > 0.5:
-                rot = True
-            drop_points = random.uniform(0, 0.2)
+                rot = False
+            drop_points = random.uniform(0, 0.5)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -232,21 +236,20 @@ class SemanticKitti(Dataset):
                        drop_points=drop_points)
 
     # open and obtain scan
-    scan.open_scan(scan_file, self.only_lidar_front)
+    division_angles = self.get_division_angles(self.division)
+    scan.open_scan(scan_file, self.only_lidar_front, division_angles)
     if self.gt:
       scan.open_label(label_file)
-      # map unused classes to used classes (also for projection)
-      scan.sem_label = self.map(scan.sem_label, self.learning_map)
-      scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
-      
-      scan_next.open_scan(next_file, self.only_lidar_front)
-      scan_next.open_label(label_file_next)
-      scan_next.sem_label = self.map(scan_next.sem_label, self.learning_map)
-      scan_next.proj_sem_label = self.map(scan_next.proj_sem_label, self.learning_map)
       projected_data = self.prepare_output(scan, scan_file)
-      projected_data_next = self.prepare_output(scan_next, next_file)
-      projected_data = self.RangePaste(projected_data, projected_data_next)
-      projected_data = self.RangeUnion(projected_data, projected_data_next)
+      # map unused classes to used classes (also for projection)
+      
+      # scan_next.open_scan(next_file, self.only_lidar_front, division_angles)
+      # scan_next.open_label(label_file_next)
+      # projected_data_next = self.prepare_output(scan_next, next_file)
+      
+      # projected_data = self.RangePaste(projected_data, projected_data_next)
+      # projected_data_2 = self.RangeUnion(projected_data, projected_data_next)
+      # self.visualize([projected_data_next[2], projected_data[2], rgb_data])
       return projected_data, rgb_data
       
     projected_data = self.prepare_output(scan, scan_file)
@@ -254,16 +257,17 @@ class SemanticKitti(Dataset):
     return projected_data, rgb_data
 
   def RangeUnion(self, output, output_next, k_union=0.5):
-    proj, proj_mask, proj_labels = output[0:3]
+    output_aug = copy.deepcopy(output)
+    proj, proj_mask, proj_labels = output_aug[0:3]
     proj_next, proj_mask_next, proj_labels_next = output_next[0:3]
     void = proj_mask <= 0
-    mask_temp = torch.rand(void.shape) <= k_union
-    # * Only fill 50% of the void points
-    void = void.logical_and(mask_temp)
+    # mask_temp = torch.rand(void.shape) <= k_union
+    # # * Only fill 50% of the void points
+    # void = void.logical_and(mask_temp)
     proj[:, void], proj_labels[void] = proj_next[:, void], proj_labels_next[void]
     proj_mask[void] = proj_mask_next[void]
-    output[0:3] = [proj, proj_mask, proj_labels]
-    return output
+    output_aug[0:3] = [proj, proj_mask, proj_labels]
+    return output_aug
 
   def RangePaste(self, output, output_next, tail_classes=None):
     proj, proj_mask, proj_labels = output[0:3]
@@ -277,8 +281,54 @@ class SemanticKitti(Dataset):
       proj_labels[pix] = proj_labels_next[pix]
     
     return output
+  
+  def visualize(self, img_list: list):
+    plot_length = len(img_list)
+    for i, img in enumerate(img_list):
+      if img.shape[0] == 3:
+        img_list[i] = img.permute(1, 2, 0)
+      else:
+        img_list[i] = self.map(img, self.learning_map_inv)
+        img_list[i] = self.map(img_list[i], self.color_map)
+        
+    fig, axs = plt.subplots(plot_length, 1)
+    for i in range(plot_length):
+      axs[i].imshow(img_list[i])
+      axs[i].axis('off')
+      
+    # Adjust spacing between subplots
+    plt.subplots_adjust(hspace=0.1)
+
+    # Show the plot
+    plt.show()
+
+  def get_division_angles(self, division):
+        # Calculate the angle per division
+        angle_per_division = 360.0 / division
+
+        # Calculate the start angle for the first division
+        first_start_angle = -angle_per_division / 2.0
+        first_end_angle = angle_per_division / 2.0
+
+        # Create a list to store the start and end angles for each division
+        division_angles = [(first_start_angle, first_end_angle)]
+
+        # Calculate the start and end angles for the remaining divisions
+        for i in range(1, division):
+            start_angle = division_angles[i-1][1]
+            if start_angle < 0.0:
+                end_angle = start_angle - angle_per_division
+            else:
+                end_angle = start_angle + angle_per_division
+            if end_angle > 180.0:
+                end_angle -= 360.0
+            division_angles.append((start_angle, end_angle))
+
+        return division_angles
 
   def prepare_output(self, scan, scan_file):
+    scan.sem_label = self.map(scan.sem_label, self.learning_map)
+    scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
     unproj_n_points = scan.points.shape[0]
     unproj_xyz = torch.full((self.max_points, 3), -1.0, dtype=torch.float)
     unproj_xyz[:unproj_n_points] = torch.from_numpy(scan.points)
@@ -395,7 +445,8 @@ class Parser():
                gt=True,           # get gt?
                shuffle_train=True,
                subset_ratio=1.0,
-               only_lidar_front=False):  # shuffle training set?
+               only_lidar_front=False,
+               division=1):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -429,7 +480,8 @@ class Parser():
                                        transform=True,
                                        gt=self.gt,
                                        only_lidar_front=only_lidar_front,
-                                       rgb_resize=rgb_resize)
+                                       rgb_resize=rgb_resize,
+                                       division=division)
     
     self.valid_dataset = SemanticKitti(root=self.root,
                                        sequences=self.valid_sequences,
@@ -441,7 +493,8 @@ class Parser():
                                        max_points=max_points,
                                        gt=self.gt,
                                        only_lidar_front=only_lidar_front,
-                                       rgb_resize=rgb_resize)
+                                       rgb_resize=rgb_resize,
+                                       division=division)
 
 
     def seed_worker(worker_id):

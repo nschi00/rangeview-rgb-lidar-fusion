@@ -156,7 +156,8 @@ class Trainer():
                              shuffle_train=True,
                              subset_ratio=self.ARCH["train"]["subset_ratio"],
                              only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
-                             rgb_resize=self.ARCH["fusion"]["rgb_resize"])
+                             rgb_resize=self.ARCH["fusion"]["rgb_resize"],
+                             division=self.ARCH["train"]["division"],)
 
         # weights for loss (and bias)
 
@@ -206,6 +207,8 @@ class Trainer():
         print("Optimizer: ", self.optim.optimizer)
         print("Scheduler: ", self.optim.scheduler)
         print("Number of workers: ", self.ARCH["train"]["workers"])
+        print("Lidar resolution: ", str(self.parser.train_dataset.dataset.sensor_img_W), "x"
+                                  , str(self.parser.train_dataset.dataset.sensor_img_H))
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))
