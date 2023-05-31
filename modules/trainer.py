@@ -206,8 +206,8 @@ class Trainer():
         print("Optimizer: ", self.optim.optimizer)
         print("Scheduler: ", self.optim.scheduler)
         print("Number of workers: ", self.ARCH["train"]["workers"])
-        print("Lidar resolution: ", str(self.parser.train_dataset.dataset.sensor_img_W), "x"
-                                  , str(self.parser.train_dataset.dataset.sensor_img_H))
+        print("Lidar resolution: ", str(self.parser.get_reso()[0]), "x"
+                                  , str(self.parser.get_reso()[1]))
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" % (
             pytorch_total_params / 1000000))

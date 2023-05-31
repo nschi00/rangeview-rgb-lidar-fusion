@@ -183,33 +183,33 @@ class SemanticKitti(Dataset):
 
     if self.gt:
       label_file = self.label_files[index]
-      index_next = index + 1
-      next_file = self.scan_files[index_next]
-      split_scan = scan_file.split("/")
-      next_scan = next_file.split("/")
-      # * Test whether the next scan is from the same sequence
-      if split_scan[-3] != next_scan[-3]: 
-        index_next = index - 1
-      del split_scan
-      del next_scan
-      next_file = self.scan_files[index_next]
-      label_file_next = self.label_files[index_next]
+      # index_next = index + 1
+      # next_file = self.scan_files[index_next]
+      # split_scan = scan_file.split("/")
+      # next_scan = next_file.split("/")
+      # # * Test whether the next scan is from the same sequence
+      # if split_scan[-3] != next_scan[-3]: 
+      #   index_next = index - 1
+      # del split_scan
+      # del next_scan
+      # next_file = self.scan_files[index_next]
+      #label_file_next = self.label_files[index_next]
 
     # open a semantic laserscan
     DA = False
     flip_sign = False
     rot = False
     drop_points = False
-    if self.transform:
-        if random.random() > 0.5:
-            # if random.random() > 0.5:
-            #     DA = True
-            if random.random() > 0.5:
-                flip_sign = True
-                rgb_data = self.img_flip(rgb_data)
+    # if self.transform:
+    #     if random.random() > 0.5:
+    #         # if random.random() > 0.5:
+    #         #     DA = True
+    #         if random.random() > 0.5:
+    #             flip_sign = True
+    #             rgb_data = self.img_flip(rgb_data)
             # if random.random() > 0.5:
             #     rot = False
-            drop_points = random.uniform(0, 0.5)
+            # drop_points = random.uniform(0, 0.5)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -223,7 +223,7 @@ class SemanticKitti(Dataset):
                           rot=rot,
                           drop_points=drop_points)
       
-      scan_next = copy.deepcopy(scan)
+      # scan_next = copy.deepcopy(scan)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
@@ -352,45 +352,28 @@ class SemanticKitti(Dataset):
   def prepare_output(self, scan, scan_file):
     scan.sem_label = self.map(scan.sem_label, self.learning_map)
     scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
-    unproj_n_points = scan.points.shape[0]
-    unproj_xyz = torch.full((self.max_points, 3), -1.0, dtype=torch.float)
-    unproj_xyz[:unproj_n_points] = torch.from_numpy(scan.points)
-    unproj_range = torch.full([self.max_points], -1.0, dtype=torch.float)
-    unproj_range[:unproj_n_points] = torch.from_numpy(scan.unproj_range)
-    unproj_remissions = torch.full([self.max_points], -1.0, dtype=torch.float)
-    unproj_remissions[:unproj_n_points] = torch.from_numpy(scan.remissions)
-    if self.gt:
-      unproj_labels = torch.full([self.max_points], -1.0, dtype=torch.int32)
-      unproj_labels[:unproj_n_points] = torch.from_numpy(scan.sem_label)
-    else:
-      unproj_labels = []
 
     # get points and labels
-    proj_range = torch.from_numpy(scan.proj_range).clone()
-    proj_xyz = torch.from_numpy(scan.proj_xyz).clone()
-    proj_remission = torch.from_numpy(scan.proj_remission).clone()
+    proj_range = torch.from_numpy(scan.proj_range)
+    proj_xyz = torch.from_numpy(scan.proj_xyz)
+    proj_remission = torch.from_numpy(scan.proj_remission)
 
-#     proj_normal = torch.from_numpy(scan.normal_image).clone()
+#     proj_normal = torch.from_numpy(scan.normal_image)
 
     proj_mask = torch.from_numpy(scan.proj_mask)
     if self.gt:
-      proj_labels = torch.from_numpy(scan.proj_sem_label).clone()
+      proj_labels = torch.from_numpy(scan.proj_sem_label)
       proj_labels = proj_labels * proj_mask
     else:
       proj_labels = []
-    proj_x = torch.full([self.max_points], -1, dtype=torch.long)
-    proj_x[:unproj_n_points] = torch.from_numpy(scan.proj_x)
-    proj_y = torch.full([self.max_points], -1, dtype=torch.long)
-    proj_y[:unproj_n_points] = torch.from_numpy(scan.proj_y)
 
+    del scan
     proj = torch.cat([proj_range.unsqueeze(0).clone(),
                       proj_xyz.clone().permute(2, 0, 1),
                       proj_remission.unsqueeze(0).clone()])
+    
+    del proj_range, proj_xyz, proj_remission
 
-#     proj = torch.cat([proj_range.unsqueeze(0).clone(),
-#                       proj_xyz.clone().permute(2, 0, 1),
-#                       proj_remission.unsqueeze(0).clone(),
-#                       proj_normal.unsqueeze(0).clone()])
 
     proj = (proj - self.sensor_img_means[:, None, None]
             ) / self.sensor_img_stds[:, None, None]
@@ -405,17 +388,9 @@ class SemanticKitti(Dataset):
     projected_data = [proj, 
                       proj_mask, 
                       proj_labels, 
-                      unproj_labels, 
                       path_seq, 
-                      path_name, 
-                      proj_x, proj_y, 
-                      proj_range, 
-                      unproj_range, 
-                      proj_xyz, 
-                      unproj_xyz, 
-                      proj_remission, 
-                      unproj_remissions, 
-                      unproj_n_points]
+                      path_name
+]
     
     return projected_data
     
@@ -601,6 +576,16 @@ class Parser():
 
   def get_n_classes(self):
     return self.nclasses
+  
+  def get_reso(self):
+    try:
+      H = self.train_dataset.dataset.sensor_img_H
+      W = self.train_dataset.dataset.sensor_img_W
+    except:
+      H = self.train_dataset.sensor_img_H
+      W = self.train_dataset.sensor_img_W
+    
+    return (H,W)
 
   def get_original_class_string(self, idx):
     return self.labels[idx]

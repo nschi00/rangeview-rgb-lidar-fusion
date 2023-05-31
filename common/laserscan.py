@@ -127,12 +127,18 @@ class LaserScan:
                          "flipping": 1.0,
                          "point_dropping": 0.9}
         rand_num = random.random()
-        self.points_to_drop = []
+
         if rand_num < self.aug_prob["point_dropping"]:
             self.points_to_drop = self.RandomDropping(points)
-        self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, self.fov_mask)))
-        self.points = np.delete(points, self.points_to_drop, axis=0)
-        remissions = np.delete(remissions, self.points_to_drop)
+            self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, self.fov_mask)))
+        else:
+            self.points_to_drop = self.fov_mask
+        
+        if len(self.points_to_drop) > 0:
+            self.points = np.delete(points, self.points_to_drop, axis=0)
+            remissions = np.delete(remissions, self.points_to_drop)
+        else:
+            self.points = points
         if rand_num < self.aug_prob["scaling"]:
             self.points = self.RandomScaling(self.points)
         if rand_num < self.aug_prob["rotation"]:
@@ -169,10 +175,11 @@ class LaserScan:
 
 
     def RandomScaling(self, scan, r_s=0.05):
-        scale = np.random.uniform(1, r_s)
+        scale = np.random.uniform(1, 1+r_s)
         if np.random.random() < 0.5:
             scale = 1 / scale
             scan[:, 0] *= scale
+            scan[:, 1] *= scale
             scan[:, 1] *= scale
         return scan
     
@@ -184,7 +191,7 @@ class LaserScan:
         return scan
     
     def RandomJittering(self, scan, r_j=0.3):
-        jitter = np.clip(np.random.normal(0, r_j, 3), -3*r_j, 3*r_j)
+        jitter = np.clip(np.random.normal(0, r_j, 3), -r_j, r_j)
         scan += jitter
         return scan
     
@@ -531,10 +538,8 @@ class SemLaserScan(LaserScan):
         # if all goes well, open label
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
-
         label = label[self.mask_front] if self.mask_front is not None else label
-
-        label = np.delete(label,self.points_to_drop)
+        label = np.delete(label,self.points_to_drop) if len(self.points_to_drop) > 0 else label
         # set it
         self.set_label(label)
 
