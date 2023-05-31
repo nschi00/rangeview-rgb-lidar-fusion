@@ -178,9 +178,8 @@ class LaserScan:
         scale = np.random.uniform(1, 1+r_s)
         if np.random.random() < 0.5:
             scale = 1 / scale
-            scan[:, 0] *= scale
-            scan[:, 1] *= scale
-            scan[:, 1] *= scale
+            scan[:, :2] *= scale
+
         return scan
     
     def GlobalRotation(self, scan):
