@@ -2,7 +2,8 @@ import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
-
+sys.path.append(os.path.join(os.getcwd(), 'modules'))
+from overfit_test import overfit_test
 from transformers import Mask2FormerModel
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
@@ -205,7 +206,7 @@ class FusionDouble(nn.Module):
         
         self.initial_conv_rgb = nn.Sequential(BasicConv2d(3, 64, kernel_size=3, padding=1),
                                               BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                              BasicConv2d(128, 128, kernel_size=3, stride=2, padding=1))
+                                              BasicConv2d(128, 128, kernel_size=3, padding=1))
 
         self.inplanes = 128
 
@@ -220,21 +221,21 @@ class FusionDouble(nn.Module):
         self.end_conv_lidar = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
                                             BasicConv2d(256, 128, kernel_size=3, padding=1))
         
-        self.end_conv_rgb = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, stride=(3,1), padding=1),
+        self.end_conv_rgb = nn.Sequential(BasicConv2d(640, 256, kernel_size=3, padding=1),
                                           BasicConv2d(256, 128, kernel_size=3, padding=1))
 
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
         
         """FUSION LAYERS"""
         # ! Redefine for different resolutions
-        project_size = np.array([64, 512])  
-        img_size = np.array([192, 512])
+        project_size = np.array([64, 192])  
+        img_size = np.array([64, 192])
         # TODO:Check original paper for better understanding
         self.fusion_layer = [
-            SwinFusion(img_size_A=project_size, img_size_B=img_size, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8, mlp_ratio=2),
-            SwinFusion(img_size_A=project_size//2, img_size_B=img_size//2, patch_size_A=(1,2), patch_size_B=(3,2), window_size=8, mlp_ratio=2),
-            SwinFusion(img_size_A=project_size//4, img_size_B=img_size//4, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4, mlp_ratio=2),
-            SwinFusion(img_size_A=project_size//8, img_size_B=img_size//8, patch_size_A=(1,2), patch_size_B=(3,2), window_size=4, mlp_ratio=2)
+            SwinFusion(img_size_A=project_size, img_size_B=img_size, patch_size_A=(2,2), patch_size_B=(2,2), window_size=16, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//2, img_size_B=img_size//2, patch_size_A=(2,2), patch_size_B=(2,2), window_size=8, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//4, img_size_B=img_size//4, patch_size_A=(1,1), patch_size_B=(1,1), window_size=4, mlp_ratio=2),
+            SwinFusion(img_size_A=project_size//8, img_size_B=img_size//8, patch_size_A=(1,1), patch_size_B=(1,1), window_size=4, mlp_ratio=2)
         ]
         self.fusion_layer = nn.ModuleList(self.fusion_layer)
 
@@ -269,7 +270,6 @@ class FusionDouble(nn.Module):
 
     def forward(self, x, rgb):
         # * get RGB features
-        rgb = torch.transpose(rgb, 2, 3) # * Make RGB same size as LiDAR
         proj_size = x.size()[2:]
         rgb_size = rgb.size()[2:]
 
@@ -288,9 +288,9 @@ class FusionDouble(nn.Module):
         for i in range(0, 4):
             x_lidar_features[str(i + 1)] = self.unet_layers_lidar[i](x_lidar_features[str(i)])
             x_rgb_features[str(i + 1)] = self.unet_layers_rgb[i](x_rgb_features[str(i)])
-            lidar_fused, rgb_fused = self.fusion_layer[i](x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)])
-            x_lidar_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_lidar_features[str(i + 1)], lidar_fused], dim=1))
-            x_rgb_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_rgb_features[str(i + 1)], rgb_fused], dim=1))
+            x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)] = self.fusion_layer[i](x_lidar_features[str(i + 1)], x_rgb_features[str(i + 1)])
+            #x_lidar_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_lidar_features[str(i + 1)], lidar_fused], dim=1))
+            #x_rgb_features[str(i + 1)] = self.resi_convs[i](torch.cat([x_rgb_features[str(i + 1)], rgb_fused], dim=1))
             
         for i in range(2, 5):
             x_lidar_features[str(i)] = F.interpolate(
@@ -586,36 +586,5 @@ def get_n_params(model):
     return pytorch_total_params
 
 if __name__ == "__main__":
-    import time
-    #model = Fusion(20).cuda()
-    #model = Cross_Attention((64, 512), (48, 128), (4, 4), (3, 1), 4, hidden_dim=96, n_head=6).cuda()
-    model = FusionDouble(20).cuda()
-    print(model)
-    total = 0
-    for module_name, module in model.named_children():
-        print(module_name)
-        print(get_n_params(module))
-        total += get_n_params(module)
-    pytorch_total_params = sum(p.numel()
-                               for p in model.parameters() if p.requires_grad)
-    print(total)
-    print(pytorch_total_params)
-
-    # for module_name, module in model.named_parameters():
-    #     if "fusion" in module_name:
-    #         print(module_name, module)
-
-    time_train = []
-    for i in range(20):
-        input_3D = torch.rand(2, 5, 64, 512).cuda()
-        input_rgb = torch.rand(2, 3, 48, 128).cuda()
-        model.eval()
-        with torch.no_grad():
-            start_time = time.time()
-            outputs = model(input_3D, input_rgb)
-        torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
-        fwt = time.time() - start_time
-        time_train.append(fwt)
-        print("Forward time per img: %.3f (Mean: %.3f)" % (
-            fwt / 1, sum(time_train) / len(time_train) / 1))
-        time.sleep(0.15)
+    model = FusionDouble(20)
+    overfit_test(model, 6, (3,64,192), (5,64,192), rgb=True)

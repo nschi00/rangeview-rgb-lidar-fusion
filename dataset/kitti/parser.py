@@ -202,13 +202,13 @@ class SemanticKitti(Dataset):
     drop_points = False
     if self.transform:
         if random.random() > 0.5:
-            if random.random() > 0.5:
-                DA = True
+            # if random.random() > 0.5:
+            #     DA = True
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.img_flip(rgb_data)
-            if random.random() > 0.5:
-                rot = False
+            # if random.random() > 0.5:
+            #     rot = False
             drop_points = random.uniform(0, 0.5)
 
     if self.gt:
@@ -256,22 +256,21 @@ class SemanticKitti(Dataset):
     # return
     return projected_data, rgb_data
 
-  def RangeUnion(self, output, output_next, k_union=0.5):
-    output_aug = copy.deepcopy(output)
-    proj, proj_mask, proj_labels = output_aug[0:3]
-    proj_next, proj_mask_next, proj_labels_next = output_next[0:3]
+  def RangeUnion(self, scan, scan_next, k_union=0.5):
+    proj, proj_mask, proj_labels = copy.deepcopy(scan[0:3])
+    proj_next, proj_mask_next, proj_labels_next = scan_next[0:3]
     void = proj_mask <= 0
-    # mask_temp = torch.rand(void.shape) <= k_union
-    # # * Only fill 50% of the void points
-    # void = void.logical_and(mask_temp)
+    mask_temp = torch.rand(void.shape) <= k_union
+    # * Only fill 50% of the void points
+    void = void.logical_and(mask_temp)
     proj[:, void], proj_labels[void] = proj_next[:, void], proj_labels_next[void]
     proj_mask[void] = proj_mask_next[void]
-    output_aug[0:3] = [proj, proj_mask, proj_labels]
-    return output_aug
+    scan[0:3] = [proj, proj_mask, proj_labels]
+    return scan
 
-  def RangePaste(self, output, output_next, tail_classes=None):
-    proj, proj_mask, proj_labels = output[0:3]
-    proj_next, proj_mask_next, proj_labels_next = output_next[0:3]
+  def RangePaste(self, scan, scan_next, tail_classes=None):
+    proj, proj_mask, proj_labels = copy.deepcopy(scan[0:3])
+    proj_next, proj_mask_next, proj_labels_next = scan_next[0:3]
     if tail_classes is None:
       tail_classes = [ 2,  3,  4,  5,  6,  7,  8, 12, 16, 18, 19]
     for tail_class in tail_classes:
@@ -280,7 +279,31 @@ class SemanticKitti(Dataset):
       proj_mask[pix] = proj_mask_next[pix]
       proj_labels[pix] = proj_labels_next[pix]
     
-    return output
+    return scan
+  
+  def RangeShift(scan):
+    proj, proj_mask, proj_labels = copy.deepcopy(scan[0:3])
+    _, h, w = proj_labels.shape
+    p = torch.randint(int(0.25*w), int(0.75*w))
+    proj = torch.cat(proj[:, p:, :], proj[:, :p, :], dim = 1)
+    proj_labels = torch.cat(proj_labels[p:, :], proj_labels[:p, :], dim = 1)
+    proj_mask = torch.cat(proj_mask[p:, :], proj_mask[:p, :], dim = 1)
+    scan[0:3] = [proj, proj_mask, proj_labels]
+    return scan
+  
+  def RangeMix(scan, scan_next, mix_strategies):
+    proj, proj_mask, proj_labels = copy.deepcopy(scan[0:3])
+    proj_next, proj_mask_next, proj_labels_next = scan_next[0:3]
+    _, h, w = proj_labels.shape
+    phi, theta = mix_strategies
+    mix_h, mix_w = int(h / phi), int(w / theta)
+    for i in range(1, mix_h):
+      for j in range(1, mix_w):
+        proj[:, i-1:i, j-1:j] = proj_next[:, i-1:i, j-1:j]
+        proj_labels[:, i-1:i, j-1:j] = proj_labels_next[:, i-1:i, j-1:j]
+        proj_mask[:, i-1:i, j-1:j] = proj_mask_next[:, i-1:i, j-1:j]
+    scan[0:3] = [proj, proj_mask, proj_labels]
+    return scan
   
   def visualize(self, img_list: list):
     plot_length = len(img_list)

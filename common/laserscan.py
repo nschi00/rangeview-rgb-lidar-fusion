@@ -100,10 +100,9 @@ class LaserScan:
         #     remissions = remissions[self.mask_front]
         self.division_angle = division_angle
         self.points_map_lidar2rgb = points
-        
-        if self.drop_points is not False:
-            self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
-        
+        fov_mask = self.points_basic_filter(points, self.division_angle[0], [-90, 90])
+        self.fov_mask = np.where(fov_mask == 0)[0]
+
         self.set_points(points, remissions)
 
     def set_points(self, points, remissions=None):
@@ -121,22 +120,42 @@ class LaserScan:
             raise TypeError("Remissions should be numpy array")
 
         # put in attribute
-        self.points = points  # get
-        if self.flip_sign:
-            self.points[:, 1] = -self.points[:, 1]
-        if self.DA:
-            jitter_x = random.uniform(-5, 5)
-            jitter_y = random.uniform(-3, 3)
-            jitter_z = random.uniform(-1, 0)
-            self.points[:, 0] += jitter_x
-            self.points[:, 1] += jitter_y
-            self.points[:, 2] += jitter_z
-        if self.rot:
-            euler_angle = np.random.normal(0, 90, 1)[0]  # 40
-            r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
-            r_t = r.transpose()
-            self.points = self.points.dot(r_t)
-            self.points = np.squeeze(self.points)
+
+        self.aug_prob = {"scaling": 1.0,
+                         "rotation": 1.0,
+                         "jittering": 1.0,
+                         "flipping": 1.0,
+                         "point_dropping": 0.9}
+        rand_num = random.random()
+        self.points_to_drop = []
+        if rand_num < self.aug_prob["point_dropping"]:
+            self.points_to_drop = self.RandomDropping(points)
+        self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, self.fov_mask)))
+        self.points = np.delete(points, self.points_to_drop, axis=0)
+        remissions = np.delete(remissions, self.points_to_drop)
+        if rand_num < self.aug_prob["scaling"]:
+            self.points = self.RandomScaling(self.points)
+        if rand_num < self.aug_prob["rotation"]:
+            self.points = self.GlobalRotation(self.points)
+        if rand_num < self.aug_prob["jittering"]:
+            self.points = self.RandomJittering(self.points)
+        if rand_num < self.aug_prob["flipping"]:
+            self.points = self.RandomFlipping(self.points)
+        # if self.flip_sign:
+        #     self.points[:, 1] = -self.points[:, 1]
+        # if self.DA:
+        #     jitter_x = random.uniform(-5, 5)
+        #     jitter_y = random.uniform(-3, 3)
+        #     jitter_z = random.uniform(-1, 0)
+        #     self.points[:, 0] += jitter_x
+        #     self.points[:, 1] += jitter_y
+        #     self.points[:, 2] += jitter_z
+        # if self.rot:
+        #     euler_angle = np.random.normal(0, 90, 1)[0]  # 40
+        #     r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        #     r_t = r.transpose()
+        #     self.points = self.points.dot(r_t)
+        #     self.points = np.squeeze(self.points)
         if remissions is not None:
             self.remissions = remissions  # get remission
             #if self.DA:
@@ -144,53 +163,48 @@ class LaserScan:
         else:
             self.remissions = np.zeros((points.shape[0]), dtype=np.float32)
 
-        fov_mask = self.points_basic_filter(points, self.division_angle[0], [-90, 90])
-        fov_mask = np.where(fov_mask == 0)[0]
-        
-        if self.drop_points is not False:
-            self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, fov_mask)))
-        else:
-            self.points_to_drop = fov_mask
-            
-        self.points = np.delete(self.points,self.points_to_drop,axis=0)
-        self.remissions = np.delete(self.remissions,self.points_to_drop)
         # if projection is wanted, then do it and fill in the structure
         if self.project:
             self.do_range_projection()
 
 
-#         fov_up = 3.0
-#         fov_down = -25.0
-#         self.fov_up = fov_up
-#         self.fov_down = fov_down
-#         fov_up = fov_up / 180.0 * np.pi  # field of view up in rad
-#         fov_down = fov_down / 180.0 * np.pi  # field of view down in rad
-#         fov = abs(fov_down) + abs(fov_up)
-#         zero_matrix = np.zeros((self.proj_H, self.proj_W))
-#         one_matrix = np.ones((self.proj_H, self.proj_W))
-
-#         self.theta_channel = np.zeros((self.proj_H, self.proj_W))
-#         self.phi_channel = np.zeros((self.proj_H, self.proj_W))
-#         for i in range(self.proj_H):
-#             for j in range(self.proj_W):
-#                 self.theta_channel[i, j] = np.pi * (float(j + 0.5) / self.proj_W * 2 - 1)
-#                 self.phi_channel[i, j] = (1 - float(i + 0.5) / self.proj_H) * fov - abs(fov_down)
-#         self.R_theta = [np.cos(self.theta_channel), -np.sin(self.theta_channel), zero_matrix,
-#                         np.sin(self.theta_channel), np.cos(self.theta_channel), zero_matrix, zero_matrix,
-#                         zero_matrix, one_matrix]
-#         self.R_theta = np.asarray(self.R_theta)
-#         self.R_theta = np.transpose(self.R_theta, (1, 2, 0))
-#         self.R_theta = np.reshape(self.R_theta, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_phi = [np.cos(self.phi_channel), zero_matrix, -np.sin(self.phi_channel), zero_matrix, one_matrix,
-#                       zero_matrix, np.sin(self.phi_channel), zero_matrix, np.cos(self.phi_channel)]
-#         self.R_phi = np.asarray(self.R_phi)
-#         self.R_phi = np.transpose(self.R_phi, (1, 2, 0))
-#         self.R_phi = np.reshape(self.R_phi, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_theta_phi = np.matmul(self.R_theta, self.R_phi)
-
-#         normal_image = self.calculate_normal(self.fill_spherical(self.proj_range))
-#         self.normal_image = normal_image * np.transpose([self.proj_mask, self.proj_mask, self.proj_mask],
-#                                                    [1, 2, 0])
+    def RandomScaling(self, scan, r_s=0.05):
+        scale = np.random.uniform(1, r_s)
+        if np.random.random() < 0.5:
+            scale = 1 / scale
+            scan[:, 0] *= scale
+            scan[:, 1] *= scale
+        return scan
+    
+    def GlobalRotation(self, scan):
+        rotate_rad = np.deg2rad(np.random.random() * 360)
+        c, s = np.cos(rotate_rad), np.sin(rotate_rad)
+        j = np.matrix([[c, s], [-s, c]])
+        scan[:, :2] = np.dot(scan[:, :2], j)
+        return scan
+    
+    def RandomJittering(self, scan, r_j=0.3):
+        jitter = np.clip(np.random.normal(0, r_j, 3), -3*r_j, 3*r_j)
+        scan += jitter
+        return scan
+    
+    def RandomFlipping(self, scan):
+        flip_type = np.random.choice(4, 1)
+        if flip_type == 1:
+            scan[:, 0] = -scan[:, 0]
+        elif flip_type == 2:
+            scan[:, 1] = -scan[:, 1]
+        elif flip_type == 3:
+            scan[:, :2] = -scan[:, :2]
+        return scan
+    
+    def RandomDropping(self, scan, r_d=0.1):
+        drop = int(len(scan) * r_d)
+        drop = np.random.randint(low=0, high=drop)
+        to_drop = np.random.randint(low=0, high=len(scan)-1, size=drop)
+        to_drop = np.unique(to_drop)
+        return to_drop
+    
     def do_fd_projection(self):
       """ Project a pointcloud into a spherical projection image.projection.
           Function takes no arguments because it can be also called externally
