@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # This file is covered by the LICENSE file in the root of this project.
 import time
-
+import torch
+import torch.nn as nn
 import numpy as np
 import math
 import random
@@ -134,7 +135,7 @@ class LaserScan:
             self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, self.fov_mask)))
         else:
             self.points_to_drop = self.fov_mask
-        
+
         if len(self.points_to_drop) > 0:
             self.points = np.delete(points, self.points_to_drop, axis=0)
             remissions = np.delete(remissions, self.points_to_drop)
@@ -182,19 +183,19 @@ class LaserScan:
             scan[:, :2] *= scale
 
         return scan
-    
+
     def GlobalRotation(self, scan):
         rotate_rad = np.deg2rad(np.random.random() * 360)
         c, s = np.cos(rotate_rad), np.sin(rotate_rad)
         j = np.matrix([[c, s], [-s, c]])
         scan[:, :2] = np.dot(scan[:, :2], j)
         return scan
-    
+
     def RandomJittering(self, scan, r_j=0.3):
         jitter = np.clip(np.random.normal(0, r_j, 3), -r_j, r_j)
         scan += jitter
         return scan
-    
+
     def RandomFlipping(self, scan):
         flip_type = np.random.choice(4, 1)
         if flip_type == 1:
@@ -204,66 +205,66 @@ class LaserScan:
         elif flip_type == 3:
             scan[:, :2] = -scan[:, :2]
         return scan
-    
+
     def RandomDropping(self, scan, r_d=0.1):
         drop = int(len(scan) * r_d)
         drop = np.random.randint(low=0, high=drop)
         to_drop = np.random.randint(low=0, high=len(scan)-1, size=drop)
         to_drop = np.unique(to_drop)
         return to_drop
-    
+
     def do_fd_projection(self):
-      """ Project a pointcloud into a spherical projection image.projection.
+        """ Project a pointcloud into a spherical projection image.projection.
           Function takes no arguments because it can be also called externally
           if the value of the constructor was not set (in case you change your
           mind about wanting the projection)
       """
-      # laser parameters
-      depth = np.linalg.norm(self.points, 2, axis=1)
-      # get scan components
-      scan_x = self.points[:, 0]
-      scan_y = self.points[:, 1]
-      scan_z = self.points[:, 2]
+        # laser parameters
+        depth = np.linalg.norm(self.points, 2, axis=1)
+        # get scan components
+        scan_x = self.points[:, 0]
+        scan_y = self.points[:, 1]
+        scan_z = self.points[:, 2]
 
-      yaw = -np.arctan2(scan_y, -scan_x)
-      proj_x = 0.5 * (yaw / np.pi + 1.0)
-      new_raw = np.nonzero((proj_x[1:] < 0.2) * (proj_x[:-1] > 0.8))[0] + 1
+        yaw = -np.arctan2(scan_y, -scan_x)
+        proj_x = 0.5 * (yaw / np.pi + 1.0)
+        new_raw = np.nonzero((proj_x[1:] < 0.2) * (proj_x[:-1] > 0.8))[0] + 1
 
-      proj_y = np.zeros_like(proj_x)
-      proj_y[new_raw] = 1
-      proj_y = np.cumsum(proj_y)
-      proj_x = proj_x * self.proj_W - 0.001
-        
-      proj_x = np.floor(proj_x)
-      proj_x = np.minimum(self.proj_W - 1, proj_x)
-      proj_x = np.maximum(0, proj_x).astype(np.int32)  # in [0,W-1]
-      self.proj_x = np.copy(proj_x)  # store a copy in orig order
+        proj_y = np.zeros_like(proj_x)
+        proj_y[new_raw] = 1
+        proj_y = np.cumsum(proj_y)
+        proj_x = proj_x * self.proj_W - 0.001
 
-      proj_y = np.floor(proj_y)
-      proj_y = np.minimum(self.proj_H - 1, proj_y)
-      proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
-      self.proj_y = np.copy(proj_y)  # stope a copy in original order
-    # stope a copy in original order
+        proj_x = np.floor(proj_x)
+        proj_x = np.minimum(self.proj_W - 1, proj_x)
+        proj_x = np.maximum(0, proj_x).astype(np.int32)  # in [0,W-1]
+        self.proj_x = np.copy(proj_x)  # store a copy in orig order
 
-      self.unproj_range = np.copy(depth)  # copy of depth in original order
+        proj_y = np.floor(proj_y)
+        proj_y = np.minimum(self.proj_H - 1, proj_y)
+        proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
+        self.proj_y = np.copy(proj_y)  # stope a copy in original order
+        # stope a copy in original order
 
-      # order in decreasing depth
-      indices = np.arange(depth.shape[0])
-      order = np.argsort(depth)[::-1]
-      depth = depth[order]
-      indices = indices[order]
-      points = self.points[order]
-      remission = self.remissions[order]
-      proj_y = proj_y[order]
-      proj_x = proj_x[order]
+        self.unproj_range = np.copy(depth)  # copy of depth in original order
 
-      # assing to images
-      self.proj_range[proj_y, proj_x] = depth
-      self.proj_xyz[proj_y, proj_x] = points
-      self.proj_remission[proj_y, proj_x] = remission
-      self.proj_idx[proj_y, proj_x] = indices
-      self.proj_mask = (self.proj_idx > 0).astype(np.float32)
-    
+        # order in decreasing depth
+        indices = np.arange(depth.shape[0])
+        order = np.argsort(depth)[::-1]
+        depth = depth[order]
+        indices = indices[order]
+        points = self.points[order]
+        remission = self.remissions[order]
+        proj_y = proj_y[order]
+        proj_x = proj_x[order]
+
+        # assing to images
+        self.proj_range[proj_y, proj_x] = depth
+        self.proj_xyz[proj_y, proj_x] = points
+        self.proj_remission[proj_y, proj_x] = remission
+        self.proj_idx[proj_y, proj_x] = indices
+        self.proj_mask = (self.proj_idx > 0).astype(np.float32)
+
     def do_range_projection(self):
         """ Project a pointcloud into a spherical projection image.projection.
             Function takes no arguments because it can be also called externally
@@ -294,7 +295,7 @@ class LaserScan:
         #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
         proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
         #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
-        
+
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
         proj_y *= self.proj_H  # in [0.0, H]
@@ -376,7 +377,7 @@ class LaserScan:
         normal_vector_camera[:, :, 1] = -normal_vector[:, :, 2]
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
-    
+
     def project_lidar_into_image(self, rgb):
         self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
 
@@ -401,7 +402,7 @@ class LaserScan:
 
                 # Reshape the list into a 3x4 matrix
                 Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
-        
+
         # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
         hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
         hom_points[:, 0:3] = self.points_map_lidar2rgb
@@ -438,7 +439,7 @@ class LaserScan:
                                     np.arctan2(n, m) > (fov[0] * np.pi / 180))
         else:
             raise NameError("fov type must be set between 'h' and 'v' ")
-        
+
     def points_basic_filter(self, points, h_fov, v_fov):
         """
             filter points based on h,v FOV and x,y,z distance range.
@@ -563,7 +564,7 @@ class SemLaserScan(LaserScan):
         assert ((self.sem_label + (self.inst_label << 16) == label).all())
 
         #if self.project:
-           # self.do_label_projection()
+        # self.do_label_projection()
 
     def colorize(self):
         """ Colorize pointcloud with the color of each semantic label
@@ -585,3 +586,275 @@ class SemLaserScan(LaserScan):
         # instances
         self.proj_inst_label[mask] = self.inst_label[self.proj_idx[mask]]
         self.proj_inst_color[mask] = self.inst_color_lut[self.inst_label[self.proj_idx[mask]]]
+
+
+class Preprocess(nn.Module):
+    def __init__(self, division, old=True, seed=1024) -> None:
+        super(Preprocess, self).__init__()
+        self.division = division
+        self.old = old
+        if old:
+            self.aug_prob = {"scaling": 0.5,
+                            "rotation": 0.5,
+                            "jittering": 0.5,
+                            "flipping": 0.5,
+                            "point_dropping": 0.5}
+
+        else:
+            self.aug_prob = {"scaling": 1.0,
+                            "rotation": 1.0,
+                            "jittering": 1.0,
+                            "flipping": 1.0,
+                            "point_dropping": 0.9}
+            
+        random.seed(seed)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        #torch.set_default_device('cuda')
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        pass
+
+    def projection(self, pcd):
+        pass
+    
+    def augmentation(self, pcd, remissions, sem_label, inst_label):
+        self.mask = self.fov_cal(pcd)
+
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd, 
+                                                                   remissions, 
+                                                                   sem_label, 
+                                                                   inst_label)
+        if random.random() < self.aug_prob["point_dropping"]:
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd, 
+                                                                         remissions, 
+                                                                         sem_label, 
+                                                                         inst_label)
+        else:
+            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
+                                                                           remissions,
+                                                                           sem_label,
+                                                                           inst_label)
+        if random.random() < self.aug_prob["scaling"]:
+            pcd = self.RandomScaling(pcd)
+        if random.random() < self.aug_prob["rotation"]:
+            pcd = self.GlobalRotation(pcd)
+        if random.random() < self.aug_prob["jittering"]:
+            pcd = self.RandomJittering(pcd)
+        if random.random() < self.aug_prob["flipping"]:
+            pcd = self.RandomFlipping(pcd)
+        
+        return pcd, remissions, sem_label, inst_label
+    
+    def old_augmentation(self, pcd, remissions, sem_label, inst_label):
+        self.mask = self.fov_cal(pcd)
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd, 
+                                                                   remissions, 
+                                                                   sem_label, 
+                                                                   inst_label)
+        if random.random() < self.aug_prob["point_dropping"]:
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd, 
+                                                                         remissions, 
+                                                                         sem_label, 
+                                                                         inst_label,
+                                                                         r_d=random.uniform(0, 0.5))
+        else:
+            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
+                                                                           remissions,
+                                                                           sem_label,
+                                                                           inst_label)
+        if random.random() < self.aug_prob["rotation"]:
+            pcd = self.old_rot(pcd)
+        if random.random() < self.aug_prob["jittering"]:
+            pcd = self.old_DA(pcd)
+        if random.random() < self.aug_prob["flipping"]:
+            pcd = self.old_flip(pcd)
+        
+        return pcd, remissions, sem_label, inst_label
+
+    def forward(self, pcd, remissions, sem_label, inst_label):
+        # pcd = torch.rand((10, 20, 3), device='cuda') * 77
+        # label = torch.randint(0, 20, (10, 20,), device='cuda')
+        if self.old:
+            pcd = self.old_augmentation(pcd, remissions, sem_label, inst_label)
+        else:
+            pcd = self.augmentation(pcd, remissions, sem_label, inst_label)
+        #pcd = self.projection(pcd)
+        return pcd
+
+    def RandomScaling(self, pcd, r_s=0.05):
+        scale = torch.rand(1, device="cuda") * r_s + 1
+        if np.random.random() < 0.5:
+            scale = 1 / scale
+            pcd *= scale
+
+        return pcd
+
+    def GlobalRotation(self, pcd):
+        rotate_rad = np.deg2rad(np.random.random() * 360)
+        c, s = np.cos(rotate_rad), np.sin(rotate_rad)
+        j = np.matrix([[c, s], [-s, c]])
+        j = torch.from_numpy(j).float().to(self.device)
+        pcd[:, :, :2] = torch.matmul(pcd[:, :, :2], j)
+        return pcd
+
+    def RandomJittering(self, pcd, r_j=0.3):
+        B = pcd.shape[0]
+        jitter = torch.clip(torch.randn((B, 1, 3), device="cuda") * 3, -r_j, r_j)
+        pcd += jitter
+        return pcd
+
+    def RandomFlipping(self, pcd):
+        flip_type = np.random.choice(4, 1)
+        if flip_type == 1:
+            pcd[:, 0] = -pcd[:, 0]
+        elif flip_type == 2:
+            pcd[:, 1] = -pcd[:, 1]
+        elif flip_type == 3:
+            pcd[:, :2] = -pcd[:, :2]
+        return pcd
+
+    def RandomDropping(self, pcd, remissions, sem_label, inst_label , r_d=0.1):
+        for i in range(len(pcd)):
+            L = pcd[i].shape[0]
+            mask = torch.bernoulli(torch.ones(L) * (1 - r_d)).bool()
+            pcd[i] = pcd[i][mask]
+            remissions[i] = remissions[i][mask]
+            sem_label[i] = sem_label[i][mask]
+            inst_label[i] = inst_label[i][mask]
+            
+        pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
+        return pcd, remissions, sem_label, inst_label
+
+    
+    def fov_cal(self, pcd):
+        # Calculate the angle per division
+        angle_per_division = 360.0 / self.division
+
+        # Calculate the start angle for the first division
+        first_start_angle = -angle_per_division / 2.0
+        first_end_angle = angle_per_division / 2.0
+
+        # Create a list to store the start and end angles for each division
+        division_angles = [(first_start_angle, first_end_angle)]
+
+        # Calculate the start and end angles for the remaining divisions
+        for i in range(1, self.division):
+            start_angle = division_angles[i-1][1]
+            if start_angle < 0.0:
+                end_angle = start_angle - angle_per_division
+            else:
+                end_angle = start_angle + angle_per_division
+            if end_angle > 180.0:
+                end_angle -= 360.0
+            division_angles.append((start_angle, end_angle))
+        
+        index = 0
+        # index = torch.randint(0, len(division_angles), (1,)).item()
+        
+        fov_mask = self.points_basic_filter(pcd, division_angles[index], [-90, 90])
+        
+        return fov_mask
+    
+    def points_basic_filter(self, points, h_fov, v_fov):
+        """
+            filter points based on h,v FOV and x,y,z distance range.
+            x,y,z direction is based on velodyne coordinates
+            1. azimuth & elevation angle limit check
+            return a bool array
+        """
+        assert points.shape[2] == 3, points.shape # [N,3]
+        x, y, z = points[:, :, 0], points[:, :, 1], points[:, :, 2]
+        # temp = torch.sqrt(x[0][0] ** 2 + y[0][0] ** 2 + z[0][0] ** 2)
+        d = torch.sqrt(x ** 2 + y ** 2 + z ** 2) # this is much faster than d = np.sqrt(np.power(points,2).sum(1))
+
+        # extract in-range fov points
+        h_points = self.hv_in_range(x, y, h_fov, fov_type='h')
+        v_points = self.hv_in_range(d, z, v_fov, fov_type='v')
+        combined = torch.logical_and(h_points, v_points)
+
+        return combined
+    
+     ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+    def hv_in_range(self, m, n, fov, fov_type='h'):
+        """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
+            horizontal limit = azimuth angle limit
+            vertical limit = elevation angle limit
+        """
+        #a = torch.atan2(n, m) > (-fov[1] * np.pi / 180)
+        if fov_type == 'h':
+            return torch.logical_and(torch.atan2(n, m) > (-fov[1] * np.pi / 180), \
+                                    torch.atan2(n, m) < (-fov[0] * np.pi / 180))
+        elif fov_type == 'v':
+            return torch.logical_and(torch.atan2(n, m) < (fov[1] * np.pi / 180), \
+                                    torch.atan2(n, m) > (fov[0] * np.pi / 180))
+        else:
+            raise NameError("fov type must be set between 'h' and 'v' ")
+    
+    def point_remove(self, pcd, remissions, sem_label, inst_label):
+        pcd = list(torch.unbind(pcd, dim=0))
+        remissions = list(torch.unbind(remissions, dim=0))
+        sem_label = list(torch.unbind(sem_label, dim=0))
+        inst_label = list(torch.unbind(inst_label, dim=0))
+        B, N = self.mask.shape
+        if B * N == torch.sum(self.mask):
+            return pcd, remissions, sem_label, inst_label
+        for i in range(len(pcd)):
+            pcd[i] = pcd[i][self.mask[i]]
+            remissions[i] = remissions[i][self.mask[i]]
+            sem_label[i] = sem_label[i][self.mask[i]]
+            inst_label[i] = inst_label[i][self.mask[i]]
+            
+        return pcd, remissions, sem_label, inst_label
+
+    def length_normalize(self, pcd, remissions, sem_label, inst_label):
+        try:
+            pcd = torch.stack(pcd, dim=0)
+            remissions = torch.stack(remissions, dim=0)
+            sem_label = torch.stack(sem_label, dim=0)
+            inst_label = torch.stack(inst_label, dim=0)
+        except:
+            min_length = min(len(arr) for arr in pcd)
+            for i in range(len(pcd)):
+                current_length = len(pcd[i])
+                index = np.random.choice(range(current_length), min_length, replace=False)
+                pcd[i] = pcd[i][index,:]
+                remissions[i] = remissions[i][index]
+                sem_label[i] = sem_label[i][index]
+                inst_label[i] = inst_label[i][index]
+                
+            
+            pcd = torch.stack(pcd, dim=0)
+            remissions = torch.stack(remissions, dim=0)
+            sem_label = torch.stack(sem_label, dim=0)
+            inst_label = torch.stack(inst_label, dim=0)
+            
+        return pcd, remissions, sem_label, inst_label
+    
+    
+    def old_flip(self, pcd):
+        pcd[:, :, 1] = -pcd[:, :, 1]
+        return pcd
+    
+    def old_DA(self, pcd):
+        B = pcd.shape[0]
+        jitter_x = torch.randn((B,1), device="cuda") * 5
+        jitter_y = torch.randn((B,1), device="cuda") * 3
+        jitter_z = torch.rand((B,1), device="cuda") * -1
+        pcd[:, :, 0] += jitter_x
+        pcd[:, :, 1] += jitter_y
+        pcd[:, :, 2] += jitter_z
+        return pcd
+    
+    def old_rot(self, pcd):
+        euler_angle = np.random.normal(0, 90, 1)[0]
+        r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        r_t = torch.from_numpy(r.transpose()).float().to(self.device).squeeze()
+        pcd = torch.matmul(pcd, r_t)
+        return pcd
+    
+if __name__ == "__main__":
+    a = [torch.ones((1,20))*0.9] * 10
+    a = torch.bernoulli(input=a)
+    none_zero = torch.sum(a)
+    prepo = Preprocess(3)
+    a = prepo(2)

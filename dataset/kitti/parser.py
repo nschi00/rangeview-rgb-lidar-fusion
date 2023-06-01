@@ -511,35 +511,30 @@ class Parser():
       batch_zip = list(zip(*batch))
       rgb = list(zip(*batch_zip[1]))
       lidar = list(zip(*batch_zip[0]))
-      pcd, remission, sem_label, ins_label = lidar
-      n_pcd, n_remission, n_sem_label, n_ins_label = [], [], [], []
+      pcd, remission, sem_label, ins_label = [list(x) for x in lidar]
 
       min_length = min(len(arr) for arr in pcd)
       for i in range(len(pcd)):
         current_length = len(pcd[i])
         index = np.random.choice(range(current_length), min_length, replace=False)
-        # new_point_cloud = [arr[random_indices] for arr in point_cloud]
-        # new_label = [arr[random_indices] for arr in label]
-        #pcd[i] = pcd[i][index]
-        
-        n_pcd.append(pcd[i][index,:])
-        n_remission.append(remission[i][index])
-        n_sem_label.append(sem_label[i][index])
-        n_ins_label.append(ins_label[i][index])
-        
-      del pcd, remission, sem_label, ins_label
-      
-      n_pcd = np.stack(n_pcd, axis=0)
-      n_remission = np.stack(n_remission, axis=0)
-      n_sem_label = np.stack(n_sem_label, axis=0)
-      n_ins_label = np.stack(n_ins_label, axis=0)
-      
-      n_pcd = torch.from_numpy(n_pcd)
-      n_remission = torch.from_numpy(n_remission)
-      n_sem_label = torch.from_numpy(n_sem_label)
-      n_ins_label = torch.from_numpy(n_ins_label)
 
-      return [n_pcd, n_remission, n_sem_label, n_ins_label], rgb
+        pcd[i] = pcd[i][index,:]
+        remission[i] = remission[i][index]
+        sem_label[i] = sem_label[i][index]
+        ins_label[i] = ins_label[i][index]
+        
+      
+      pcd = np.stack(pcd, axis=0)
+      remission = np.stack(remission, axis=0)
+      sem_label = np.stack(sem_label, axis=0)
+      ins_label = np.stack(ins_label, axis=0)
+      
+      pcd = torch.from_numpy(pcd)
+      remission = torch.from_numpy(remission)
+      sem_label = torch.from_numpy(sem_label)
+      ins_label = torch.from_numpy(ins_label)
+
+      return [pcd, remission, sem_label, ins_label], rgb
     
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,

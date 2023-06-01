@@ -27,7 +27,7 @@ from modules.network.Fusion import FusionDouble
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
-
+from common.laserscan import Preprocess
 from collections import defaultdict
 
 def save_to_log(logdir, logfile, message):
@@ -428,9 +428,10 @@ class Trainer():
         self.model.train()
 
         end = time.time()
+        prepro = Preprocess(1)
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
             pcd, remission, sem_label, inst_label = proj_data
-
+            prepro(pcd.cuda(), remission.cuda(), sem_label.cuda(), inst_label.cuda())
             in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
