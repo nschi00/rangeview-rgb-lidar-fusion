@@ -8,6 +8,9 @@ import random
 from scipy.spatial.transform import Rotation as R
 import cv2
 from PIL import Image, ImageDraw
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -585,3 +588,183 @@ class SemLaserScan(LaserScan):
         # instances
         self.proj_inst_label[mask] = self.inst_label[self.proj_idx[mask]]
         self.proj_inst_color[mask] = self.inst_color_lut[self.inst_label[self.proj_idx[mask]]]
+
+
+class Preprocess(nn.Module):
+    def __init__(self, sem_color_dict=None, max_classes=300, aug_params=None, H=64, W=1024, fov_up=3.0, fov_down=-25.0) -> None:
+        
+        self.proj_fov_up = fov_up
+        self.proj_fov_down = fov_down
+
+        self.proj_W = W
+        self.proj_H = H
+
+        # make semantic colors
+        if sem_color_dict:
+            # if I have a dict, make it
+            max_sem_key = 0
+            for key, data in sem_color_dict.items():
+                if key + 1 > max_sem_key:
+                    max_sem_key = key + 1
+            self.sem_color_lut = np.zeros((max_sem_key + 100, 3), dtype=np.float32)
+            for key, value in sem_color_dict.items():
+                self.sem_color_lut[key] = np.array(value, np.float32) / 255.0
+        else:
+            # otherwise make random
+            max_sem_key = max_classes
+            self.sem_color_lut = np.random.uniform(low=0.0,
+                                                   high=1.0,
+                                                   size=(max_sem_key, 3))
+            # force zero to a gray-ish color
+            self.sem_color_lut[0] = np.full((3), 0.1)
+
+        # make instance colors
+        max_inst_id = 100000
+        self.inst_color_lut = np.random.uniform(low=0.0,
+                                                high=1.0,
+                                                size=(max_inst_id, 3))
+        # force zero to a gray-ish color
+        self.inst_color_lut[0] = np.full((3), 0.1)
+    
+    def projection(self, pcd, remissions, sem_label, inst_label):
+        bs = pcd.shape[0]
+        # projected range image - [B,H,W] range (-1 is no data)
+        proj_range = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                  dtype=torch.float32, device="cuda")
+
+        # projected point cloud xyz - [B,3,H,W] xyz coord (-1 is no data)
+        proj_xyz = torch.full((bs, 3, self.proj_H, self.proj_W), -1,
+                                dtype=torch.float32, device="cuda")
+
+        # projected remission - [B,H,W] intensity (-1 is no data)
+        proj_remission = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                      dtype=torch.float32, device="cuda")
+        
+        proj_idx = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                dtype=torch.int32, device="cuda")
+
+        # mask containing for each pixel, if it contains a point or not
+        proj_mask = torch.zeros((bs, self.proj_H, self.proj_W),
+                                  dtype=torch.int32, device="cuda")  # [H,W] mask
+        
+        # projection color with semantic labels
+        proj_sem_label = np.zeros((self.proj_H, self.proj_W),
+                                       dtype=np.int32)  # [H,W]  label
+        proj_sem_color = np.zeros((self.proj_H, self.proj_W, 3),
+                                       dtype=np.float)  # [H,W,3] color
+
+        # projection color with instance labels
+        proj_inst_label = np.zeros((self.proj_H, self.proj_W),
+                                        dtype=np.int32)  # [H,W]  label
+        proj_inst_color = np.zeros((self.proj_H, self.proj_W, 3),
+                                        dtype=np.float)
+
+        # laser parameters
+        fov_up = self.proj_fov_up / 180.0 * np.pi  # field of view up in rad
+        fov_down = self.proj_fov_down / 180.0 * np.pi  # field of view down in rad
+        fov_vert = abs(fov_down) + abs(fov_up)  # get field of view total in rad
+
+        # get depth of all points
+        depth = torch.linalg.norm(pcd, 2, dim=2)
+
+        # get scan components
+        scan_x = pcd[:, :, 0]
+        scan_y = pcd[:, :, 1]
+        scan_z = pcd[:, :, 2]
+
+        # get angles of all points
+        yaw = -torch.arctan2(scan_y, scan_x)
+        pitch = torch.arcsin(scan_z / depth)
+
+        # get projections in image coords
+        # proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+        proj_y = 1.0 - (pitch + abs(fov_down)) / fov_vert  # in [0.0, 1.0]
+        #self.fov_vert = [-14, 5]
+        #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
+        proj_x = abs((yaw) - (yaw.min(dim=1)[0].unsqueeze(1).expand(-1, 1000))) / abs((yaw.min(dim=1)[0]) - (yaw.max(dim=1)[0])).unsqueeze(1).expand(-1, 1000) # using yaw due to varying values for fov_hor
+        #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
+        
+        # scale to image size using angular resolution
+        proj_x *= self.proj_W  # in [0.0, W]
+        proj_y *= self.proj_H  # in [0.0, H]
+
+        # round and clamp for use as index
+        proj_x = torch.floor(proj_x)
+        proj_x = torch.minimum((self.proj_W - 1) * torch.ones_like(proj_x), proj_x)
+        proj_x = torch.maximum(torch.zeros_like(proj_x), proj_x).type(torch.long)  # in [0,W-1]
+
+        proj_y = torch.floor(proj_y)
+        proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_x), proj_y)
+        proj_y = torch.maximum(torch.zeros_like(proj_x), proj_y).type(torch.long)  # in [0,H-1]
+
+        # order in decreasing depth
+        indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
+        order = torch.argsort(depth, dim=1, descending=True)
+        depth = torch.gather(depth, dim=1, index=order)
+        indices = torch.gather(indices, dim=1, index=order)
+        points_x = torch.gather(pcd[:, :, 0], dim=1, index=order)
+        points_y = torch.gather(pcd[:, :, 1], dim=1, index=order)
+        points_z = torch.gather(pcd[:, :, 2], dim=1, index=order)
+        points = torch.stack((points_x, points_y, points_z))
+        remission = torch.gather(remissions, dim=1, index=order)
+        proj_y = torch.gather(proj_y, dim=1, index=order)
+        proj_x = torch.gather(proj_x, dim=1, index=order)
+
+        # assign to images
+        proj_range[:, proj_y, proj_x] = depth
+        proj_xyz[:,:, proj_y, proj_x] = points
+        proj_remission[:, proj_y, proj_x] = remission
+        proj_idx[:, proj_y, proj_x] = indices.int()
+        proj_mask = (proj_idx > 0).type(torch.int32)
+
+        proj = torch.cat([proj_range.unsqueeze(0),
+                      proj_xyz.permute(1, 0, 2, 3),
+                      proj_remission.unsqueeze(0)])
+
+        proj = (proj - self.sensor_img_means[:, None, None]
+                ) / self.sensor_img_stds[:, None, None]
+
+        proj = proj * proj_mask.float()
+
+        # semantics
+        proj_sem_label[proj_mask] = sem_label[proj_idx[proj_mask]]
+        proj_sem_color[proj_mask] = self.sem_color_lut[sem_label[proj_idx[proj_mask]]]
+
+        # instances
+        proj_inst_label[proj_mask] = inst_label[proj_idx[proj_mask]]
+        proj_inst_color[proj_mask] = self.inst_color_lut[inst_label[proj_idx[proj_mask]]]
+
+        return proj, proj_mask, proj_labels
+    def augmentation(self, pcd):
+        pass
+
+    def visualize(self, img_list: list):
+        plot_length = len(img_list)
+        for i, img in enumerate(img_list):
+            if img.shape[0] == 3:
+                img_list[i] = img.permute(1, 2, 0)
+            else:
+                img_list[i] = self.map(img, self.learning_map_inv)
+                img_list[i] = self.map(img_list[i], self.color_map)
+            
+        fig, axs = plt.subplots(plot_length, 1)
+        for i in range(plot_length):
+            axs[i].imshow(img_list[i])
+            axs[i].axis('off')
+        
+        # Adjust spacing between subplots
+        plt.subplots_adjust(hspace=0.1)
+
+        # Show the plot
+        plt.show()
+    
+    def forward(self, pcd, remission, sem_label, inst_label):
+        # pcd = self.augmentation(pcd)
+        proj, proj_mask, proj_labels = self.projection(pcd, remission, sem_label, inst_label)
+        return pcd
+    
+if __name__ == "__main__":
+    Test = Preprocess()
+    pcd = torch.rand((26, 1000, 3), device='cuda') * 77
+    remissions = torch.rand((26, 1000), device='cuda') * 77
+    Test.forward(pcd, remissions, None, None)

@@ -30,6 +30,8 @@ from tqdm import tqdm
 
 from collections import defaultdict
 
+from common.laserscan import Preprocess
+
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
     f.write(message + '\n')
@@ -428,6 +430,9 @@ class Trainer():
         self.model.train()
 
         end = time.time()
+
+        preprocess = Preprocess()
+
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
             pcd, remission, sem_label, inst_label = proj_data
 
