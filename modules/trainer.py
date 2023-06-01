@@ -429,6 +429,8 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
+            pcd, remission, sem_label, inst_label = proj_data
+
             in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)

@@ -102,8 +102,9 @@ class LaserScan:
         self.points_map_lidar2rgb = points
         fov_mask = self.points_basic_filter(points, self.division_angle[0], [-90, 90])
         self.fov_mask = np.where(fov_mask == 0)[0]
-
-        self.set_points(points, remissions)
+        self.points = points
+        self.remissions = remissions
+        #self.set_points(points, remissions)
 
     def set_points(self, points, remissions=None):
         """ Set scan attributes (instead of opening from file)
@@ -537,8 +538,8 @@ class SemLaserScan(LaserScan):
         # if all goes well, open label
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
-        label = label[self.mask_front] if self.mask_front is not None else label
-        label = np.delete(label,self.points_to_drop) if len(self.points_to_drop) > 0 else label
+
+        # label = np.delete(label,self.points_to_drop) if len(self.points_to_drop) > 0 else label
         # set it
         self.set_label(label)
 
@@ -561,8 +562,8 @@ class SemLaserScan(LaserScan):
         # sanity check
         assert ((self.sem_label + (self.inst_label << 16) == label).all())
 
-        if self.project:
-            self.do_label_projection()
+        #if self.project:
+           # self.do_label_projection()
 
     def colorize(self):
         """ Colorize pointcloud with the color of each semantic label

@@ -240,7 +240,7 @@ class SemanticKitti(Dataset):
     scan.open_scan(scan_file, self.only_lidar_front, division_angles)
     if self.gt:
       scan.open_label(label_file)
-      projected_data = self.prepare_output(scan, scan_file)
+      # projected_data = self.prepare_output(scan, scan_file)
       # map unused classes to used classes (also for projection)
       
       # scan_next.open_scan(next_file, self.only_lidar_front, division_angles)
@@ -250,7 +250,7 @@ class SemanticKitti(Dataset):
       # projected_data = self.RangePaste(projected_data, projected_data_next)
       # projected_data_2 = self.RangeUnion(projected_data, projected_data_next)
       # self.visualize([projected_data_next[2], projected_data[2], rgb_data])
-      return projected_data, rgb_data
+      return [scan.points, scan.remissions, scan.sem_label, scan.inst_label], rgb_data
       
     projected_data = self.prepare_output(scan, scan_file)
     # return
@@ -506,13 +506,49 @@ class Parser():
       samples_step = np.rint(1 / subset_ratio).astype('int')
       self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, len(self.train_dataset), samples_step))
 
+
+    def collate_fn(batch):
+      batch_zip = list(zip(*batch))
+      rgb = list(zip(*batch_zip[1]))
+      lidar = list(zip(*batch_zip[0]))
+      pcd, remission, sem_label, ins_label = lidar
+      n_pcd, n_remission, n_sem_label, n_ins_label = [], [], [], []
+
+      min_length = min(len(arr) for arr in pcd)
+      for i in range(len(pcd)):
+        current_length = len(pcd[i])
+        index = np.random.choice(range(current_length), min_length, replace=False)
+        # new_point_cloud = [arr[random_indices] for arr in point_cloud]
+        # new_label = [arr[random_indices] for arr in label]
+        #pcd[i] = pcd[i][index]
+        
+        n_pcd.append(pcd[i][index,:])
+        n_remission.append(remission[i][index])
+        n_sem_label.append(sem_label[i][index])
+        n_ins_label.append(ins_label[i][index])
+        
+      del pcd, remission, sem_label, ins_label
+      
+      n_pcd = np.stack(n_pcd, axis=0)
+      n_remission = np.stack(n_remission, axis=0)
+      n_sem_label = np.stack(n_sem_label, axis=0)
+      n_ins_label = np.stack(n_ins_label, axis=0)
+      
+      n_pcd = torch.from_numpy(n_pcd)
+      n_remission = torch.from_numpy(n_remission)
+      n_sem_label = torch.from_numpy(n_sem_label)
+      n_ins_label = torch.from_numpy(n_ins_label)
+
+      return [n_pcd, n_remission, n_sem_label, n_ins_label], rgb
+    
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,
                                                    shuffle=self.shuffle_train,
                                                    num_workers=self.workers,
                                                    worker_init_fn=seed_worker,
                                                    generator=g,
-                                                   drop_last=True)
+                                                   drop_last=True,
+                                                   collate_fn=collate_fn)
     assert len(self.trainloader) > 0
     self.trainiter = iter(self.trainloader)
     
