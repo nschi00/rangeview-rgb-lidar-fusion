@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # This file is covered by the LICENSE file in the root of this project.
 import time
+import os
+#os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 
 import numpy as np
 import math
@@ -107,7 +109,7 @@ class LaserScan:
         self.fov_mask = np.where(fov_mask == 0)[0]
         self.points = points
         self.remissions = remissions
-        #self.set_points(points, remissions)
+    # self.set_points(points, remissions)
 
     def set_points(self, points, remissions=None):
         """ Set scan attributes (instead of opening from file)
@@ -137,7 +139,7 @@ class LaserScan:
             self.points_to_drop = np.unique(np.concatenate((self.points_to_drop, self.fov_mask)))
         else:
             self.points_to_drop = self.fov_mask
-        
+
         if len(self.points_to_drop) > 0:
             self.points = np.delete(points, self.points_to_drop, axis=0)
             remissions = np.delete(remissions, self.points_to_drop)
@@ -185,19 +187,19 @@ class LaserScan:
             scan[:, :2] *= scale
 
         return scan
-    
+
     def GlobalRotation(self, scan):
         rotate_rad = np.deg2rad(np.random.random() * 360)
         c, s = np.cos(rotate_rad), np.sin(rotate_rad)
         j = np.matrix([[c, s], [-s, c]])
         scan[:, :2] = np.dot(scan[:, :2], j)
         return scan
-    
+
     def RandomJittering(self, scan, r_j=0.3):
         jitter = np.clip(np.random.normal(0, r_j, 3), -r_j, r_j)
         scan += jitter
         return scan
-    
+
     def RandomFlipping(self, scan):
         flip_type = np.random.choice(4, 1)
         if flip_type == 1:
@@ -207,66 +209,66 @@ class LaserScan:
         elif flip_type == 3:
             scan[:, :2] = -scan[:, :2]
         return scan
-    
+
     def RandomDropping(self, scan, r_d=0.1):
         drop = int(len(scan) * r_d)
         drop = np.random.randint(low=0, high=drop)
         to_drop = np.random.randint(low=0, high=len(scan)-1, size=drop)
         to_drop = np.unique(to_drop)
         return to_drop
-    
+
     def do_fd_projection(self):
-      """ Project a pointcloud into a spherical projection image.projection.
+        """ Project a pointcloud into a spherical projection image.projection.
           Function takes no arguments because it can be also called externally
           if the value of the constructor was not set (in case you change your
           mind about wanting the projection)
       """
-      # laser parameters
-      depth = np.linalg.norm(self.points, 2, axis=1)
-      # get scan components
-      scan_x = self.points[:, 0]
-      scan_y = self.points[:, 1]
-      scan_z = self.points[:, 2]
+        # laser parameters
+        depth = np.linalg.norm(self.points, 2, axis=1)
+        # get scan components
+        scan_x = self.points[:, 0]
+        scan_y = self.points[:, 1]
+        scan_z = self.points[:, 2]
 
-      yaw = -np.arctan2(scan_y, -scan_x)
-      proj_x = 0.5 * (yaw / np.pi + 1.0)
-      new_raw = np.nonzero((proj_x[1:] < 0.2) * (proj_x[:-1] > 0.8))[0] + 1
+        yaw = -np.arctan2(scan_y, -scan_x)
+        proj_x = 0.5 * (yaw / np.pi + 1.0)
+        new_raw = np.nonzero((proj_x[1:] < 0.2) * (proj_x[:-1] > 0.8))[0] + 1
 
-      proj_y = np.zeros_like(proj_x)
-      proj_y[new_raw] = 1
-      proj_y = np.cumsum(proj_y)
-      proj_x = proj_x * self.proj_W - 0.001
-        
-      proj_x = np.floor(proj_x)
-      proj_x = np.minimum(self.proj_W - 1, proj_x)
-      proj_x = np.maximum(0, proj_x).astype(np.int32)  # in [0,W-1]
-      self.proj_x = np.copy(proj_x)  # store a copy in orig order
+        proj_y = np.zeros_like(proj_x)
+        proj_y[new_raw] = 1
+        proj_y = np.cumsum(proj_y)
+        proj_x = proj_x * self.proj_W - 0.001
 
-      proj_y = np.floor(proj_y)
-      proj_y = np.minimum(self.proj_H - 1, proj_y)
-      proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
-      self.proj_y = np.copy(proj_y)  # stope a copy in original order
-    # stope a copy in original order
+        proj_x = np.floor(proj_x)
+        proj_x = np.minimum(self.proj_W - 1, proj_x)
+        proj_x = np.maximum(0, proj_x).astype(np.int32)  # in [0,W-1]
+        self.proj_x = np.copy(proj_x)  # store a copy in orig order
 
-      self.unproj_range = np.copy(depth)  # copy of depth in original order
+        proj_y = np.floor(proj_y)
+        proj_y = np.minimum(self.proj_H - 1, proj_y)
+        proj_y = np.maximum(0, proj_y).astype(np.int32)  # in [0,H-1]
+        self.proj_y = np.copy(proj_y)  # stope a copy in original order
+        # stope a copy in original order
 
-      # order in decreasing depth
-      indices = np.arange(depth.shape[0])
-      order = np.argsort(depth)[::-1]
-      depth = depth[order]
-      indices = indices[order]
-      points = self.points[order]
-      remission = self.remissions[order]
-      proj_y = proj_y[order]
-      proj_x = proj_x[order]
+        self.unproj_range = np.copy(depth)  # copy of depth in original order
 
-      # assing to images
-      self.proj_range[proj_y, proj_x] = depth
-      self.proj_xyz[proj_y, proj_x] = points
-      self.proj_remission[proj_y, proj_x] = remission
-      self.proj_idx[proj_y, proj_x] = indices
-      self.proj_mask = (self.proj_idx > 0).astype(np.float32)
-    
+        # order in decreasing depth
+        indices = np.arange(depth.shape[0])
+        order = np.argsort(depth)[::-1]
+        depth = depth[order]
+        indices = indices[order]
+        points = self.points[order]
+        remission = self.remissions[order]
+        proj_y = proj_y[order]
+        proj_x = proj_x[order]
+
+        # assing to images
+        self.proj_range[proj_y, proj_x] = depth
+        self.proj_xyz[proj_y, proj_x] = points
+        self.proj_remission[proj_y, proj_x] = remission
+        self.proj_idx[proj_y, proj_x] = indices
+        self.proj_mask = (self.proj_idx > 0).astype(np.float32)
+
     def do_range_projection(self):
         """ Project a pointcloud into a spherical projection image.projection.
             Function takes no arguments because it can be also called externally
@@ -297,7 +299,7 @@ class LaserScan:
         #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
         proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
         #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
-        
+
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
         proj_y *= self.proj_H  # in [0.0, H]
@@ -379,7 +381,7 @@ class LaserScan:
         normal_vector_camera[:, :, 1] = -normal_vector[:, :, 2]
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
-    
+
     def project_lidar_into_image(self, rgb):
         self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
 
@@ -404,7 +406,7 @@ class LaserScan:
 
                 # Reshape the list into a 3x4 matrix
                 Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
-        
+
         # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
         hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
         hom_points[:, 0:3] = self.points_map_lidar2rgb
@@ -441,7 +443,7 @@ class LaserScan:
                                     np.arctan2(n, m) > (fov[0] * np.pi / 180))
         else:
             raise NameError("fov type must be set between 'h' and 'v' ")
-        
+
     def points_basic_filter(self, points, h_fov, v_fov):
         """
             filter points based on h,v FOV and x,y,z distance range.
@@ -566,7 +568,7 @@ class SemLaserScan(LaserScan):
         assert ((self.sem_label + (self.inst_label << 16) == label).all())
 
         #if self.project:
-           # self.do_label_projection()
+        # self.do_label_projection()
 
     def colorize(self):
         """ Colorize pointcloud with the color of each semantic label
@@ -591,42 +593,36 @@ class SemLaserScan(LaserScan):
 
 
 class Preprocess(nn.Module):
-    def __init__(self, sem_color_dict=None, max_classes=300, aug_params=None, H=64, W=1024, fov_up=3.0, fov_down=-25.0) -> None:
-        
+
+    def __init__(self,
+                 max_classes=300,
+                 aug_params=None,
+                 sensor=None,
+                 learning_map=None,
+                 learning_map_inv=None,
+                 color_map=None,
+                 fov_up=3.0,
+                 fov_down=-25.0) -> None:
+        super(Preprocess, self).__init__()
+
         self.proj_fov_up = fov_up
         self.proj_fov_down = fov_down
+        self.sensor = sensor
+        self.learning_map = learning_map
+        self.learning_map_inv = learning_map_inv
+        self.proj_W = sensor["img_prop"]["width"]
+        self.proj_H = sensor["img_prop"]["height"]
+        self.sensor_img_means = torch.tensor(sensor["img_means"],
+                                         dtype=torch.float,
+                                         device="cuda")
+        self.sensor_img_stds = torch.tensor(sensor["img_stds"],
+                                        dtype=torch.float,
+                                        device="cuda")
+        self.color_map = color_map
 
-        self.proj_W = W
-        self.proj_H = H
 
-        # make semantic colors
-        if sem_color_dict:
-            # if I have a dict, make it
-            max_sem_key = 0
-            for key, data in sem_color_dict.items():
-                if key + 1 > max_sem_key:
-                    max_sem_key = key + 1
-            self.sem_color_lut = np.zeros((max_sem_key + 100, 3), dtype=np.float32)
-            for key, value in sem_color_dict.items():
-                self.sem_color_lut[key] = np.array(value, np.float32) / 255.0
-        else:
-            # otherwise make random
-            max_sem_key = max_classes
-            self.sem_color_lut = np.random.uniform(low=0.0,
-                                                   high=1.0,
-                                                   size=(max_sem_key, 3))
-            # force zero to a gray-ish color
-            self.sem_color_lut[0] = np.full((3), 0.1)
 
-        # make instance colors
-        max_inst_id = 100000
-        self.inst_color_lut = np.random.uniform(low=0.0,
-                                                high=1.0,
-                                                size=(max_inst_id, 3))
-        # force zero to a gray-ish color
-        self.inst_color_lut[0] = np.full((3), 0.1)
-    
-    def projection(self, pcd, remissions, sem_label, inst_label):
+    def projection_points(self, pcd, remissions):
         bs = pcd.shape[0]
         # projected range image - [B,H,W] range (-1 is no data)
         proj_range = torch.full((bs, self.proj_H, self.proj_W), -1,
@@ -639,25 +635,13 @@ class Preprocess(nn.Module):
         # projected remission - [B,H,W] intensity (-1 is no data)
         proj_remission = torch.full((bs, self.proj_H, self.proj_W), -1,
                                       dtype=torch.float32, device="cuda")
-        
+
         proj_idx = torch.full((bs, self.proj_H, self.proj_W), -1,
                                 dtype=torch.int32, device="cuda")
 
         # mask containing for each pixel, if it contains a point or not
         proj_mask = torch.zeros((bs, self.proj_H, self.proj_W),
                                   dtype=torch.int32, device="cuda")  # [H,W] mask
-        
-        # projection color with semantic labels
-        proj_sem_label = np.zeros((self.proj_H, self.proj_W),
-                                       dtype=np.int32)  # [H,W]  label
-        proj_sem_color = np.zeros((self.proj_H, self.proj_W, 3),
-                                       dtype=np.float)  # [H,W,3] color
-
-        # projection color with instance labels
-        proj_inst_label = np.zeros((self.proj_H, self.proj_W),
-                                        dtype=np.int32)  # [H,W]  label
-        proj_inst_color = np.zeros((self.proj_H, self.proj_W, 3),
-                                        dtype=np.float)
 
         # laser parameters
         fov_up = self.proj_fov_up / 180.0 * np.pi  # field of view up in rad
@@ -681,9 +665,10 @@ class Preprocess(nn.Module):
         proj_y = 1.0 - (pitch + abs(fov_down)) / fov_vert  # in [0.0, 1.0]
         #self.fov_vert = [-14, 5]
         #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
-        proj_x = abs((yaw) - (yaw.min(dim=1)[0].unsqueeze(1).expand(-1, 1000))) / abs((yaw.min(dim=1)[0]) - (yaw.max(dim=1)[0])).unsqueeze(1).expand(-1, 1000) # using yaw due to varying values for fov_hor
+
+        proj_x = abs((yaw) - yaw.min(dim=1)[0].unsqueeze(1)) / abs((yaw.min(dim=1)[0]) - (yaw.max(dim=1)[0])).unsqueeze(1) # using yaw due to varying values for fov_hor
         #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
-        
+
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
         proj_y *= self.proj_H  # in [0.0, H]
@@ -700,6 +685,8 @@ class Preprocess(nn.Module):
         # order in decreasing depth
         indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
         order = torch.argsort(depth, dim=1, descending=True)
+
+
         depth = torch.gather(depth, dim=1, index=order)
         indices = torch.gather(indices, dim=1, index=order)
         points_x = torch.gather(pcd[:, :, 0], dim=1, index=order)
@@ -715,26 +702,38 @@ class Preprocess(nn.Module):
         proj_xyz[:,:, proj_y, proj_x] = points
         proj_remission[:, proj_y, proj_x] = remission
         proj_idx[:, proj_y, proj_x] = indices.int()
-        proj_mask = (proj_idx > 0).type(torch.int32)
+        proj_mask = (proj_idx > 0).long()
 
         proj = torch.cat([proj_range.unsqueeze(0),
                       proj_xyz.permute(1, 0, 2, 3),
                       proj_remission.unsqueeze(0)])
 
-        proj = (proj - self.sensor_img_means[:, None, None]
-                ) / self.sensor_img_stds[:, None, None]
+        proj = (proj - self.sensor_img_means[:, None, None, None]
+                ) / self.sensor_img_stds[:, None, None, None]
 
         proj = proj * proj_mask.float()
 
+        return proj, proj_mask, proj_idx
+    
+    
+    def projection_labels(self, proj_idx, sem_label):
+        mask = proj_idx >= 0
+        bs = proj_idx.shape[0]
+        proj_idx = proj_idx.long()
+        sem_label = sem_label.long()
         # semantics
-        proj_sem_label[proj_mask] = sem_label[proj_idx[proj_mask]]
-        proj_sem_color[proj_mask] = self.sem_color_lut[sem_label[proj_idx[proj_mask]]]
-
-        # instances
-        proj_inst_label[proj_mask] = inst_label[proj_idx[proj_mask]]
-        proj_inst_color[proj_mask] = self.inst_color_lut[inst_label[proj_idx[proj_mask]]]
-
-        return proj, proj_mask, proj_labels
+        
+        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
+        #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
+        
+        for i in range(bs):
+            proj_sem_label[i, mask[i]] = sem_label[i][proj_idx[i][mask[i]]]
+            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
+        #scan.sem_label = self.map(scan.sem_label, self.learning_map)
+        
+        return proj_sem_label
+        
+        
     def augmentation(self, pcd):
         pass
 
@@ -744,27 +743,58 @@ class Preprocess(nn.Module):
             if img.shape[0] == 3:
                 img_list[i] = img.permute(1, 2, 0)
             else:
-                img_list[i] = self.map(img, self.learning_map_inv)
-                img_list[i] = self.map(img_list[i], self.color_map)
-            
+                try:
+                    img_list[i] = self.map(img, self.learning_map_inv)
+                    img_list[i] = self.map(img_list[i], self.color_map)
+                except:
+                    img_list[i] = img_list[i]
+
         fig, axs = plt.subplots(plot_length, 1)
         for i in range(plot_length):
-            axs[i].imshow(img_list[i])
+            axs[i].imshow(img_list[i].cpu())
             axs[i].axis('off')
-        
+
         # Adjust spacing between subplots
         plt.subplots_adjust(hspace=0.1)
 
         # Show the plot
         plt.show()
-    
+
     def forward(self, pcd, remission, sem_label, inst_label):
         # pcd = self.augmentation(pcd)
-        proj, proj_mask, proj_labels = self.projection(pcd, remission, sem_label, inst_label)
-        return pcd
+        proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
+        proj_labels = self.projection_labels(proj_idx, sem_label)
+        self.visualize([proj_labels[1].cpu().numpy(), proj[1, 0].cpu().numpy()])
+        return proj, proj_mask, proj_labels
     
+    @staticmethod
+    def map(label, mapdict):
+        # put label from original values to xentropy
+        # or vice-versa, depending on dictionary values
+        # make learning map a lookup table
+        maxkey = 0
+        for key, data in mapdict.items():
+            if isinstance(data, list):
+                nel = len(data)
+            else:
+                nel = 1
+            if key > maxkey:
+                maxkey = key
+        # +100 hack making lut bigger just in case there are unknown labels
+        if nel > 1:
+            lut = torch.zeros((maxkey + 100, nel), dtype=torch.int32, device='cuda')
+        else:
+            lut = torch.zeros((maxkey + 100), dtype=torch.int32, device='cuda')
+        for key, data in mapdict.items():
+            try:
+                lut[key] = data
+            except IndexError:
+                print("Wrong key ", key)
+        # do the mapping
+        return lut[label]
+
 if __name__ == "__main__":
     Test = Preprocess()
     pcd = torch.rand((26, 1000, 3), device='cuda') * 77
     remissions = torch.rand((26, 1000), device='cuda') * 77
-    Test.forward(pcd, remissions, None, None)
+    Test(pcd, remissions, remissions, remissions)

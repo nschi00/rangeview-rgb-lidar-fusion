@@ -240,7 +240,7 @@ class SemanticKitti(Dataset):
     scan.open_scan(scan_file, self.only_lidar_front, division_angles)
     if self.gt:
       scan.open_label(label_file)
-      # projected_data = self.prepare_output(scan, scan_file)
+      projected_data = self.prepare_output(scan, scan_file)
       # map unused classes to used classes (also for projection)
       
       # scan_next.open_scan(next_file, self.only_lidar_front, division_angles)
