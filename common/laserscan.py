@@ -679,8 +679,8 @@ class Preprocess(nn.Module):
         proj_x = torch.maximum(torch.zeros_like(proj_x), proj_x).type(torch.long)  # in [0,W-1]
 
         proj_y = torch.floor(proj_y)
-        proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_x), proj_y)
-        proj_y = torch.maximum(torch.zeros_like(proj_x), proj_y).type(torch.long)  # in [0,H-1]
+        proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_y), proj_y)
+        proj_y = torch.maximum(torch.zeros_like(proj_y), proj_y).type(torch.long)  # in [0,H-1]
 
         # order in decreasing depth
         indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
@@ -689,19 +689,20 @@ class Preprocess(nn.Module):
 
         depth = torch.gather(depth, dim=1, index=order)
         indices = torch.gather(indices, dim=1, index=order)
-        points_x = torch.gather(pcd[:, :, 0], dim=1, index=order)
-        points_y = torch.gather(pcd[:, :, 1], dim=1, index=order)
-        points_z = torch.gather(pcd[:, :, 2], dim=1, index=order)
-        points = torch.stack((points_x, points_y, points_z))
+        points_x = torch.gather(scan_x, dim=1, index=order)
+        points_y = torch.gather(scan_y, dim=1, index=order)
+        points_z = torch.gather(scan_z, dim=1, index=order)
+        points = torch.stack((points_x, points_y, points_z), dim=1)
         remission = torch.gather(remissions, dim=1, index=order)
         proj_y = torch.gather(proj_y, dim=1, index=order)
         proj_x = torch.gather(proj_x, dim=1, index=order)
 
         # assign to images
-        proj_range[:, proj_y, proj_x] = depth
-        proj_xyz[:,:, proj_y, proj_x] = points
-        proj_remission[:, proj_y, proj_x] = remission
-        proj_idx[:, proj_y, proj_x] = indices
+        for i in range(bs):
+            proj_range[i, proj_y[i, :], proj_x[i, :]] = depth[i]
+            proj_xyz[i,:, proj_y[i, :], proj_x[i, :]] = points[i]
+            proj_remission[i, proj_y[i, :], proj_x[i, :]] = remission[i]
+            proj_idx[i, proj_y[i, :], proj_x[i, :]] = indices[i]
         proj_mask = (proj_idx > 0).long()
 
         proj = torch.cat([proj_range.unsqueeze(1),
@@ -712,7 +713,7 @@ class Preprocess(nn.Module):
         proj = (proj - self.sensor_img_means[None, :, None, None]
                 ) / self.sensor_img_stds[None, :, None, None]
 
-        proj = proj * proj_mask.float()
+        proj = proj * proj_mask.unsqueeze(1).repeat_interleave(5, dim=1).float()
 
         return proj, proj_mask, proj_idx
     
@@ -741,7 +742,7 @@ class Preprocess(nn.Module):
         pass
 
     def visualize(self, proj, proj_mask, proj_labels):
-        image = self.make_log_img(proj[0][0].cpu().numpy(), proj_mask[0].cpu().numpy(), proj_labels[0].cpu().numpy(), self.to_color)
+        image = self.make_log_img(proj.cpu().numpy(), proj_mask.cpu().numpy(), proj_labels.cpu().numpy(), self.to_color)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         plt.imshow(image_rgb)
 
@@ -749,7 +750,7 @@ class Preprocess(nn.Module):
         # pcd = self.augmentation(pcd)
         proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
         proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
-        self.visualize(proj, proj_mask, proj_labels)
+        self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
         return proj, proj_mask, proj_labels
     
     def make_log_img(self, depth, mask, gt, color_fn):
