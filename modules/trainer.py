@@ -28,7 +28,7 @@ from modules.network.Fusion import FusionDouble
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
-
+from common.laserscan import Preprocess
 from collections import defaultdict
 
 from common.laserscan import Preprocess
@@ -436,9 +436,6 @@ class Trainer():
         self.model.train()
 
         end = time.time()
-
-        
-
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
             pcd, remission, sem_label, inst_label = proj_data
             pcd = self.preprocess.forward(pcd.cuda(), remission.cuda(), sem_label.cuda(), inst_label.cuda())

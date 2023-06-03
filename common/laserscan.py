@@ -2,8 +2,6 @@
 # This file is covered by the LICENSE file in the root of this project.
 import time
 import os
-#os.environ["CUDA_LAUNCH_BLOCKING"]="1"
-
 import numpy as np
 import math
 import random
@@ -593,7 +591,6 @@ class SemLaserScan(LaserScan):
 
 
 class Preprocess(nn.Module):
-
     def __init__(self,
                  max_classes=300,
                  aug_params=None,
@@ -602,7 +599,10 @@ class Preprocess(nn.Module):
                  learning_map_inv=None,
                  color_map=None,
                  fov_up=3.0,
-                 fov_down=-25.0) -> None:
+                 fov_down=-25.0,
+                 division=1,
+                 old_aug=False,
+                 seed=1024) -> None:
         super(Preprocess, self).__init__()
 
         self.proj_fov_up = fov_up
@@ -619,8 +619,82 @@ class Preprocess(nn.Module):
                                         dtype=torch.float,
                                         device="cuda")
         self.color_map = color_map
+        super(Preprocess, self).__init__()
+        self.division = division
+        self.old = old_aug
+        if self.old:
+            self.aug_prob = {"scaling": 0.5,
+                            "rotation": 0.5,
+                            "jittering": 0.5,
+                            "flipping": 0.5,
+                            "point_dropping": 0.5}
 
+        else:
+            self.aug_prob = {"scaling": 1.0,
+                            "rotation": 1.0,
+                            "jittering": 1.0,
+                            "flipping": 1.0,
+                            "point_dropping": 0.9}
 
+        random.seed(seed)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        #torch.set_default_device('cuda')
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    def augmentation(self, pcd, remissions, sem_label, inst_label):
+        self.mask = self.fov_cal(pcd)
+
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
+                                                                   remissions,
+                                                                   sem_label,
+                                                                   inst_label)
+        if random.random() < self.aug_prob["point_dropping"]:
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
+                                                                         remissions,
+                                                                         sem_label,
+                                                                         inst_label)
+        else:
+            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
+                                                                           remissions,
+                                                                           sem_label,
+                                                                           inst_label)
+        if random.random() < self.aug_prob["scaling"]:
+            pcd = self.RandomScaling(pcd)
+        if random.random() < self.aug_prob["rotation"]:
+            pcd = self.GlobalRotation(pcd)
+        if random.random() < self.aug_prob["jittering"]:
+            pcd = self.RandomJittering(pcd)
+        if random.random() < self.aug_prob["flipping"]:
+            pcd = self.RandomFlipping(pcd)
+
+        return pcd, remissions, sem_label, inst_label
+
+    def old_augmentation(self, pcd, remissions, sem_label, inst_label):
+        self.mask = self.fov_cal(pcd)
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
+                                                                   remissions,
+                                                                   sem_label,
+                                                                   inst_label)
+        if random.random() < self.aug_prob["point_dropping"]:
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
+                                                                         remissions,
+                                                                         sem_label,
+                                                                         inst_label,
+                                                                         r_d=random.uniform(0, 0.5))
+        else:
+            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
+                                                                           remissions,
+                                                                           sem_label,
+                                                                           inst_label)
+        if random.random() < self.aug_prob["rotation"]:
+            pcd = self.old_rot(pcd)
+        if random.random() < self.aug_prob["jittering"]:
+            pcd = self.old_DA(pcd)
+        if random.random() < self.aug_prob["flipping"]:
+            pcd = self.old_flip(pcd)
+
+        return pcd, remissions, sem_label, inst_label
 
     def projection_points(self, pcd, remissions):
         bs = pcd.shape[0]
@@ -716,18 +790,18 @@ class Preprocess(nn.Module):
         proj = proj * proj_mask.unsqueeze(1).repeat_interleave(5, dim=1).float()
 
         return proj, proj_mask, proj_idx
-    
-    
+
+
     def projection_labels(self, proj_idx, proj_mask, sem_label):
         mask = proj_idx >= 0
         bs = proj_idx.shape[0]
         proj_idx = proj_idx.long()
         sem_label = sem_label.long()
         # semantics
-        
+
         proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
         #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
-        
+
         for i in range(bs):
             proj_sem_label[i, mask[i]] = sem_label[i][proj_idx[i][mask[i]]]
             proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
@@ -737,9 +811,176 @@ class Preprocess(nn.Module):
 
         return proj_sem_label
 
-        
-    def augmentation(self, pcd):
-        pass
+    def RandomScaling(self, pcd, r_s=0.05):
+        scale = torch.rand(1, device="cuda") * r_s + 1
+        if np.random.random() < 0.5:
+            scale = 1 / scale
+            pcd *= scale
+
+        return pcd
+
+    def GlobalRotation(self, pcd):
+        rotate_rad = np.deg2rad(np.random.random() * 360)
+        c, s = np.cos(rotate_rad), np.sin(rotate_rad)
+        j = np.matrix([[c, s], [-s, c]])
+        j = torch.from_numpy(j).float().to(self.device)
+        pcd[:, :, :2] = torch.matmul(pcd[:, :, :2], j)
+        return pcd
+
+    def RandomJittering(self, pcd, r_j=0.3):
+        B = pcd.shape[0]
+        jitter = torch.clip(torch.randn((B, 1, 3), device="cuda") * 3, -r_j, r_j)
+        pcd += jitter
+        return pcd
+
+    def RandomFlipping(self, pcd):
+        flip_type = np.random.choice(4, 1)
+        if flip_type == 1:
+            pcd[:, 0] = -pcd[:, 0]
+        elif flip_type == 2:
+            pcd[:, 1] = -pcd[:, 1]
+        elif flip_type == 3:
+            pcd[:, :2] = -pcd[:, :2]
+        return pcd
+
+    def RandomDropping(self, pcd, remissions, sem_label, inst_label , r_d=0.1):
+        for i in range(len(pcd)):
+            L = pcd[i].shape[0]
+            mask = torch.bernoulli(torch.ones(L) * (1 - r_d)).bool()
+            pcd[i] = pcd[i][mask]
+            remissions[i] = remissions[i][mask]
+            sem_label[i] = sem_label[i][mask]
+            inst_label[i] = inst_label[i][mask]
+
+        pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
+        return pcd, remissions, sem_label, inst_label
+
+
+    def fov_cal(self, pcd):
+        # Calculate the angle per division
+        angle_per_division = 360.0 / self.division
+
+        # Calculate the start angle for the first division
+        first_start_angle = -angle_per_division / 2.0
+        first_end_angle = angle_per_division / 2.0
+
+        # Create a list to store the start and end angles for each division
+        division_angles = [(first_start_angle, first_end_angle)]
+
+        # Calculate the start and end angles for the remaining divisions
+        for i in range(1, self.division):
+            start_angle = division_angles[i-1][1]
+            if start_angle < 0.0:
+                end_angle = start_angle - angle_per_division
+            else:
+                end_angle = start_angle + angle_per_division
+            if end_angle > 180.0:
+                end_angle -= 360.0
+            division_angles.append((start_angle, end_angle))
+
+        index = 0
+        # index = torch.randint(0, len(division_angles), (1,)).item()
+
+        fov_mask = self.points_basic_filter(pcd, division_angles[index], [-90, 90])
+
+        return fov_mask
+
+    def points_basic_filter(self, points, h_fov, v_fov):
+        """
+            filter points based on h,v FOV and x,y,z distance range.
+            x,y,z direction is based on velodyne coordinates
+            1. azimuth & elevation angle limit check
+            return a bool array
+        """
+        assert points.shape[2] == 3, points.shape # [N,3]
+        x, y, z = points[:, :, 0], points[:, :, 1], points[:, :, 2]
+        # temp = torch.sqrt(x[0][0] ** 2 + y[0][0] ** 2 + z[0][0] ** 2)
+        d = torch.sqrt(x ** 2 + y ** 2 + z ** 2) # this is much faster than d = np.sqrt(np.power(points,2).sum(1))
+
+        # extract in-range fov points
+        h_points = self.hv_in_range(x, y, h_fov, fov_type='h')
+        v_points = self.hv_in_range(d, z, v_fov, fov_type='v')
+        combined = torch.logical_and(h_points, v_points)
+
+        return combined
+
+    ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+    def hv_in_range(self, m, n, fov, fov_type='h'):
+        """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
+            horizontal limit = azimuth angle limit
+            vertical limit = elevation angle limit
+        """
+        #a = torch.atan2(n, m) > (-fov[1] * np.pi / 180)
+        if fov_type == 'h':
+            return torch.logical_and(torch.atan2(n, m) > (-fov[1] * np.pi / 180), \
+                                    torch.atan2(n, m) < (-fov[0] * np.pi / 180))
+        elif fov_type == 'v':
+            return torch.logical_and(torch.atan2(n, m) < (fov[1] * np.pi / 180), \
+                                    torch.atan2(n, m) > (fov[0] * np.pi / 180))
+        else:
+            raise NameError("fov type must be set between 'h' and 'v' ")
+
+    def point_remove(self, pcd, remissions, sem_label, inst_label):
+        pcd = list(torch.unbind(pcd, dim=0))
+        remissions = list(torch.unbind(remissions, dim=0))
+        sem_label = list(torch.unbind(sem_label, dim=0))
+        inst_label = list(torch.unbind(inst_label, dim=0))
+        B, N = self.mask.shape
+        if B * N == torch.sum(self.mask):
+            return pcd, remissions, sem_label, inst_label
+        for i in range(len(pcd)):
+            pcd[i] = pcd[i][self.mask[i]]
+            remissions[i] = remissions[i][self.mask[i]]
+            sem_label[i] = sem_label[i][self.mask[i]]
+            inst_label[i] = inst_label[i][self.mask[i]]
+
+        return pcd, remissions, sem_label, inst_label
+
+    def length_normalize(self, pcd, remissions, sem_label, inst_label):
+        try:
+            pcd = torch.stack(pcd, dim=0)
+            remissions = torch.stack(remissions, dim=0)
+            sem_label = torch.stack(sem_label, dim=0)
+            inst_label = torch.stack(inst_label, dim=0)
+        except:
+            min_length = min(len(arr) for arr in pcd)
+            for i in range(len(pcd)):
+                current_length = len(pcd[i])
+                index = np.random.choice(range(current_length), min_length, replace=False)
+                pcd[i] = pcd[i][index,:]
+                remissions[i] = remissions[i][index]
+                sem_label[i] = sem_label[i][index]
+                inst_label[i] = inst_label[i][index]
+
+
+            pcd = torch.stack(pcd, dim=0)
+            remissions = torch.stack(remissions, dim=0)
+            sem_label = torch.stack(sem_label, dim=0)
+            inst_label = torch.stack(inst_label, dim=0)
+
+        return pcd, remissions, sem_label, inst_label
+
+
+    def old_flip(self, pcd):
+        pcd[:, :, 1] = -pcd[:, :, 1]
+        return pcd
+
+    def old_DA(self, pcd):
+        B = pcd.shape[0]
+        jitter_x = torch.randn((B,1), device="cuda") * 5
+        jitter_y = torch.randn((B,1), device="cuda") * 3
+        jitter_z = torch.rand((B,1), device="cuda") * -1
+        pcd[:, :, 0] += jitter_x
+        pcd[:, :, 1] += jitter_y
+        pcd[:, :, 2] += jitter_z
+        return pcd
+
+    def old_rot(self, pcd):
+        euler_angle = np.random.normal(0, 90, 1)[0]
+        r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        r_t = torch.from_numpy(r.transpose()).float().to(self.device).squeeze()
+        pcd = torch.matmul(pcd, r_t)
+        return pcd
 
     def visualize(self, proj, proj_mask, proj_labels):
         image = self.make_log_img(proj.cpu().numpy(), proj_mask.cpu().numpy(), proj_labels.cpu().numpy(), self.to_color)
@@ -747,12 +988,17 @@ class Preprocess(nn.Module):
         plt.imshow(image_rgb)
 
     def forward(self, pcd, remission, sem_label, inst_label):
-        # pcd = self.augmentation(pcd)
+        if self.old:
+            pcd, remission, sem_label, inst_label = self.old_augmentation(
+                pcd, remission, sem_label, inst_label)
+        else:
+            pcd, remission, sem_label, inst_label = self.augmentation(
+                pcd, remission, sem_label, inst_label)
         proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
         proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
         self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
         return proj, proj_mask, proj_labels
-    
+
     def make_log_img(self, depth, mask, gt, color_fn):
         # input should be [depth, pred, gt]
         # make range image (normalized to 0,1 for saving)
@@ -765,13 +1011,13 @@ class Preprocess(nn.Module):
         gt_color = color_fn(gt)
         out_img = np.concatenate([out_img, gt_color], axis=0)
         return (out_img).astype(np.uint8)
-    
+
     def to_color(self, label):
         # put label in original values
         label = self.map_old(label, self.learning_map_inv)
         # put label in color
         return self.map_old(label, self.color_map)
-    
+
     @staticmethod
     def map(label, mapdict):
         # put label from original values to xentropy
@@ -823,7 +1069,7 @@ class Preprocess(nn.Module):
                 print("Wrong key ", key)
         # do the mapping
         return lut[label]
-        
+
     def get_mpl_colormap(self, cmap_name):
         cmap = plt.get_cmap(cmap_name)
         # Initialize the matplotlib color map
@@ -833,7 +1079,8 @@ class Preprocess(nn.Module):
         return color_range.reshape(256, 1, 3)
 
 if __name__ == "__main__":
-    Test = Preprocess()
-    pcd = torch.rand((26, 1000, 3), device='cuda') * 77
-    remissions = torch.rand((26, 1000), device='cuda') * 77
-    Test(pcd, remissions, remissions, remissions)
+    a = [torch.ones((1,20))*0.9] * 10
+    a = torch.bernoulli(input=a)
+    none_zero = torch.sum(a)
+    prepo = Preprocess(3)
+    a = prepo(2)
