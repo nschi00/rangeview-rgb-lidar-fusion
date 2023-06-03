@@ -20,6 +20,7 @@ from collections.abc import Sequence, Iterable
 import warnings
 from matplotlib import pyplot as plt
 import pandas as pd
+import warnings
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -240,7 +241,7 @@ class SemanticKitti(Dataset):
     scan.open_scan(scan_file, self.only_lidar_front, division_angles)
     if self.gt:
       scan.open_label(label_file)
-      projected_data = self.prepare_output(scan, scan_file)
+      # projected_data = self.prepare_output(scan, scan_file)
       # map unused classes to used classes (also for projection)
       
       # scan_next.open_scan(next_file, self.only_lidar_front, division_angles)
@@ -250,9 +251,10 @@ class SemanticKitti(Dataset):
       # projected_data = self.RangePaste(projected_data, projected_data_next)
       # projected_data_2 = self.RangeUnion(projected_data, projected_data_next)
       # self.visualize([projected_data_next[2], projected_data[2], rgb_data])
-      return [scan.points, scan.remissions, scan.sem_label, scan.inst_label], rgb_data
+      return [scan.points, scan.remissions, scan.sem_label, scan.inst_label, scan.filename], rgb_data
       
-    projected_data = self.prepare_output(scan, scan_file)
+    projected_data = self.prepare_output(scan, scan_file) ##TODO: Prepare for using no GT
+    warnings.warn("Implementation in parser for not using GT is not correctly implemented yet!")
     # return
     return projected_data, rgb_data
 
@@ -511,7 +513,7 @@ class Parser():
       batch_zip = list(zip(*batch))
       rgb = list(zip(*batch_zip[1]))
       lidar = list(zip(*batch_zip[0]))
-      pcd, remission, sem_label, ins_label = lidar
+      pcd, remission, sem_label, ins_label, file_name = lidar
       n_pcd, n_remission, n_sem_label, n_ins_label = [], [], [], []
 
       min_length = min(len(arr) for arr in pcd)

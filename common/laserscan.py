@@ -637,7 +637,7 @@ class Preprocess(nn.Module):
                                       dtype=torch.float32, device="cuda")
 
         proj_idx = torch.full((bs, self.proj_H, self.proj_W), -1,
-                                dtype=torch.int32, device="cuda")
+                                dtype=torch.int64, device="cuda")
 
         # mask containing for each pixel, if it contains a point or not
         proj_mask = torch.zeros((bs, self.proj_H, self.proj_W),
@@ -701,22 +701,23 @@ class Preprocess(nn.Module):
         proj_range[:, proj_y, proj_x] = depth
         proj_xyz[:,:, proj_y, proj_x] = points
         proj_remission[:, proj_y, proj_x] = remission
-        proj_idx[:, proj_y, proj_x] = indices.int()
+        proj_idx[:, proj_y, proj_x] = indices
         proj_mask = (proj_idx > 0).long()
 
-        proj = torch.cat([proj_range.unsqueeze(0),
-                      proj_xyz.permute(1, 0, 2, 3),
-                      proj_remission.unsqueeze(0)])
+        proj = torch.cat([proj_range.unsqueeze(1),
+                      proj_xyz,
+                      proj_remission.unsqueeze(1)],
+                      dim=1)
 
-        proj = (proj - self.sensor_img_means[:, None, None, None]
-                ) / self.sensor_img_stds[:, None, None, None]
+        proj = (proj - self.sensor_img_means[None, :, None, None]
+                ) / self.sensor_img_stds[None, :, None, None]
 
         proj = proj * proj_mask.float()
 
         return proj, proj_mask, proj_idx
     
     
-    def projection_labels(self, proj_idx, sem_label):
+    def projection_labels(self, proj_idx, proj_mask, sem_label):
         mask = proj_idx >= 0
         bs = proj_idx.shape[0]
         proj_idx = proj_idx.long()
@@ -730,42 +731,45 @@ class Preprocess(nn.Module):
             proj_sem_label[i, mask[i]] = sem_label[i][proj_idx[i][mask[i]]]
             proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
         #scan.sem_label = self.map(scan.sem_label, self.learning_map)
-        
+
+        proj_sem_label *= proj_mask
+
         return proj_sem_label
-        
+
         
     def augmentation(self, pcd):
         pass
 
-    def visualize(self, img_list: list):
-        plot_length = len(img_list)
-        for i, img in enumerate(img_list):
-            if img.shape[0] == 3:
-                img_list[i] = img.permute(1, 2, 0)
-            else:
-                try:
-                    img_list[i] = self.map(img, self.learning_map_inv)
-                    img_list[i] = self.map(img_list[i], self.color_map)
-                except:
-                    img_list[i] = img_list[i]
-
-        fig, axs = plt.subplots(plot_length, 1)
-        for i in range(plot_length):
-            axs[i].imshow(img_list[i].cpu())
-            axs[i].axis('off')
-
-        # Adjust spacing between subplots
-        plt.subplots_adjust(hspace=0.1)
-
-        # Show the plot
-        plt.show()
+    def visualize(self, proj, proj_mask, proj_labels):
+        image = self.make_log_img(proj[0][0].cpu().numpy(), proj_mask[0].cpu().numpy(), proj_labels[0].cpu().numpy(), self.to_color)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        plt.imshow(image_rgb)
 
     def forward(self, pcd, remission, sem_label, inst_label):
         # pcd = self.augmentation(pcd)
         proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
-        proj_labels = self.projection_labels(proj_idx, sem_label)
-        self.visualize([proj_labels[1].cpu().numpy(), proj[1, 0].cpu().numpy()])
+        proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
+        self.visualize(proj, proj_mask, proj_labels)
         return proj, proj_mask, proj_labels
+    
+    def make_log_img(self, depth, mask, gt, color_fn):
+        # input should be [depth, pred, gt]
+        # make range image (normalized to 0,1 for saving)
+        depth = (cv2.normalize(depth, None, alpha=0, beta=1,
+                               norm_type=cv2.NORM_MINMAX,
+                               dtype=cv2.CV_32F) * 255.0).astype(np.uint8)
+        out_img = cv2.applyColorMap(
+            depth, self.get_mpl_colormap('viridis')) * mask[..., None]
+        # make label gt
+        gt_color = color_fn(gt)
+        out_img = np.concatenate([out_img, gt_color], axis=0)
+        return (out_img).astype(np.uint8)
+    
+    def to_color(self, label):
+        # put label in original values
+        label = self.map_old(label, self.learning_map_inv)
+        # put label in color
+        return self.map_old(label, self.color_map)
     
     @staticmethod
     def map(label, mapdict):
@@ -792,6 +796,40 @@ class Preprocess(nn.Module):
                 print("Wrong key ", key)
         # do the mapping
         return lut[label]
+
+    @staticmethod
+    def map_old(label, mapdict):
+        # put label from original values to xentropy
+        # or vice-versa, depending on dictionary values
+        # make learning map a lookup table
+        maxkey = 0
+        for key, data in mapdict.items():
+            if isinstance(data, list):
+                nel = len(data)
+            else:
+                nel = 1
+            if key > maxkey:
+                maxkey = key
+        # +100 hack making lut bigger just in case there are unknown labels
+        if nel > 1:
+            lut = np.zeros((maxkey + 100, nel), dtype=np.int32)
+        else:
+            lut = np.zeros((maxkey + 100), dtype=np.int32)
+        for key, data in mapdict.items():
+            try:
+                lut[key] = data
+            except IndexError:
+                print("Wrong key ", key)
+        # do the mapping
+        return lut[label]
+        
+    def get_mpl_colormap(self, cmap_name):
+        cmap = plt.get_cmap(cmap_name)
+        # Initialize the matplotlib color map
+        sm = plt.cm.ScalarMappable(cmap=cmap)
+        # Obtain linear color range
+        color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+        return color_range.reshape(256, 1, 3)
 
 if __name__ == "__main__":
     Test = Preprocess()
