@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 # This file is covered by the LICENSE file in the root of this project.
-import time
-import os
 import numpy as np
-import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
@@ -592,7 +589,6 @@ class SemLaserScan(LaserScan):
 
 class Preprocess(nn.Module):
     def __init__(self,
-                 max_classes=300,
                  aug_params=None,
                  sensor=None,
                  learning_map=None,
