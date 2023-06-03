@@ -2,6 +2,7 @@
 # This file is covered by the LICENSE file in the root of this project.
 import datetime
 import os
+
 import time
 import cv2
 import torch
@@ -29,6 +30,8 @@ from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 from common.laserscan import Preprocess
 from collections import defaultdict
+
+from common.laserscan import Preprocess
 
 def save_to_log(logdir, logfile, message):
     f = open(logdir + '/' + logfile, "a")
@@ -160,8 +163,13 @@ class Trainer():
                              rgb_resize=self.ARCH["fusion"]["rgb_resize"],
                              division=self.ARCH["train"]["division"],)
 
+        self.preprocess = Preprocess(color_map=DATA["color_map"],
+                                     learning_map=DATA["learning_map"],
+                                     learning_map_inv=DATA["learning_map_inv"],
+                                     sensor=self.ARCH["dataset"]["sensor"])
         # weights for loss (and bias)
 
+        
         epsilon_w = self.ARCH["train"]["epsilon_w"]
         content = torch.zeros(self.parser.get_n_classes(), dtype=torch.float)
         for cl, freq in DATA["content"].items():
@@ -428,10 +436,9 @@ class Trainer():
         self.model.train()
 
         end = time.time()
-        prepro = Preprocess(1)
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
             pcd, remission, sem_label, inst_label = proj_data
-            prepro(pcd.cuda(), remission.cuda(), sem_label.cuda(), inst_label.cuda())
+            pcd = self.preprocess.forward(pcd.cuda(), remission.cuda(), sem_label.cuda(), inst_label.cuda())
             in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)

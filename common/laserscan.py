@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # This file is covered by the LICENSE file in the root of this project.
 import time
-import torch
-import torch.nn as nn
+import os
 import numpy as np
 import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
 from PIL import Image, ImageDraw
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -105,7 +107,7 @@ class LaserScan:
         self.fov_mask = np.where(fov_mask == 0)[0]
         self.points = points
         self.remissions = remissions
-        #self.set_points(points, remissions)
+    # self.set_points(points, remissions)
 
     def set_points(self, points, remissions=None):
         """ Set scan attributes (instead of opening from file)
@@ -589,11 +591,38 @@ class SemLaserScan(LaserScan):
 
 
 class Preprocess(nn.Module):
-    def __init__(self, division, old=True, seed=1024) -> None:
+    def __init__(self,
+                 max_classes=300,
+                 aug_params=None,
+                 sensor=None,
+                 learning_map=None,
+                 learning_map_inv=None,
+                 color_map=None,
+                 fov_up=3.0,
+                 fov_down=-25.0,
+                 division=1,
+                 old_aug=False,
+                 seed=1024) -> None:
+        super(Preprocess, self).__init__()
+
+        self.proj_fov_up = fov_up
+        self.proj_fov_down = fov_down
+        self.sensor = sensor
+        self.learning_map = learning_map
+        self.learning_map_inv = learning_map_inv
+        self.proj_W = sensor["img_prop"]["width"]
+        self.proj_H = sensor["img_prop"]["height"]
+        self.sensor_img_means = torch.tensor(sensor["img_means"],
+                                         dtype=torch.float,
+                                         device="cuda")
+        self.sensor_img_stds = torch.tensor(sensor["img_stds"],
+                                        dtype=torch.float,
+                                        device="cuda")
+        self.color_map = color_map
         super(Preprocess, self).__init__()
         self.division = division
-        self.old = old
-        if old:
+        self.old = old_aug
+        if self.old:
             self.aug_prob = {"scaling": 0.5,
                             "rotation": 0.5,
                             "jittering": 0.5,
@@ -606,28 +635,24 @@ class Preprocess(nn.Module):
                             "jittering": 1.0,
                             "flipping": 1.0,
                             "point_dropping": 0.9}
-            
+
         random.seed(seed)
         torch.manual_seed(seed)
         np.random.seed(seed)
         #torch.set_default_device('cuda')
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        pass
 
-    def projection(self, pcd):
-        pass
-    
     def augmentation(self, pcd, remissions, sem_label, inst_label):
         self.mask = self.fov_cal(pcd)
 
-        pcd, remissions, sem_label, inst_label = self.point_remove(pcd, 
-                                                                   remissions, 
-                                                                   sem_label, 
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
+                                                                   remissions,
+                                                                   sem_label,
                                                                    inst_label)
         if random.random() < self.aug_prob["point_dropping"]:
-            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd, 
-                                                                         remissions, 
-                                                                         sem_label, 
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
+                                                                         remissions,
+                                                                         sem_label,
                                                                          inst_label)
         else:
             pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
@@ -642,19 +667,19 @@ class Preprocess(nn.Module):
             pcd = self.RandomJittering(pcd)
         if random.random() < self.aug_prob["flipping"]:
             pcd = self.RandomFlipping(pcd)
-        
+
         return pcd, remissions, sem_label, inst_label
-    
+
     def old_augmentation(self, pcd, remissions, sem_label, inst_label):
         self.mask = self.fov_cal(pcd)
-        pcd, remissions, sem_label, inst_label = self.point_remove(pcd, 
-                                                                   remissions, 
-                                                                   sem_label, 
+        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
+                                                                   remissions,
+                                                                   sem_label,
                                                                    inst_label)
         if random.random() < self.aug_prob["point_dropping"]:
-            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd, 
-                                                                         remissions, 
-                                                                         sem_label, 
+            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
+                                                                         remissions,
+                                                                         sem_label,
                                                                          inst_label,
                                                                          r_d=random.uniform(0, 0.5))
         else:
@@ -668,18 +693,123 @@ class Preprocess(nn.Module):
             pcd = self.old_DA(pcd)
         if random.random() < self.aug_prob["flipping"]:
             pcd = self.old_flip(pcd)
-        
+
         return pcd, remissions, sem_label, inst_label
 
-    def forward(self, pcd, remissions, sem_label, inst_label):
-        # pcd = torch.rand((10, 20, 3), device='cuda') * 77
-        # label = torch.randint(0, 20, (10, 20,), device='cuda')
-        if self.old:
-            pcd = self.old_augmentation(pcd, remissions, sem_label, inst_label)
-        else:
-            pcd = self.augmentation(pcd, remissions, sem_label, inst_label)
-        #pcd = self.projection(pcd)
-        return pcd
+    def projection_points(self, pcd, remissions):
+        bs = pcd.shape[0]
+        # projected range image - [B,H,W] range (-1 is no data)
+        proj_range = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                  dtype=torch.float32, device="cuda")
+
+        # projected point cloud xyz - [B,3,H,W] xyz coord (-1 is no data)
+        proj_xyz = torch.full((bs, 3, self.proj_H, self.proj_W), -1,
+                                dtype=torch.float32, device="cuda")
+
+        # projected remission - [B,H,W] intensity (-1 is no data)
+        proj_remission = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                      dtype=torch.float32, device="cuda")
+
+        proj_idx = torch.full((bs, self.proj_H, self.proj_W), -1,
+                                dtype=torch.int64, device="cuda")
+
+        # mask containing for each pixel, if it contains a point or not
+        proj_mask = torch.zeros((bs, self.proj_H, self.proj_W),
+                                  dtype=torch.int32, device="cuda")  # [H,W] mask
+
+        # laser parameters
+        fov_up = self.proj_fov_up / 180.0 * np.pi  # field of view up in rad
+        fov_down = self.proj_fov_down / 180.0 * np.pi  # field of view down in rad
+        fov_vert = abs(fov_down) + abs(fov_up)  # get field of view total in rad
+
+        # get depth of all points
+        depth = torch.linalg.norm(pcd, 2, dim=2)
+
+        # get scan components
+        scan_x = pcd[:, :, 0]
+        scan_y = pcd[:, :, 1]
+        scan_z = pcd[:, :, 2]
+
+        # get angles of all points
+        yaw = -torch.arctan2(scan_y, scan_x)
+        pitch = torch.arcsin(scan_z / depth)
+
+        # get projections in image coords
+        # proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+        proj_y = 1.0 - (pitch + abs(fov_down)) / fov_vert  # in [0.0, 1.0]
+        #self.fov_vert = [-14, 5]
+        #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
+
+        proj_x = abs((yaw) - yaw.min(dim=1)[0].unsqueeze(1)) / abs((yaw.min(dim=1)[0]) - (yaw.max(dim=1)[0])).unsqueeze(1) # using yaw due to varying values for fov_hor
+        #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
+
+        # scale to image size using angular resolution
+        proj_x *= self.proj_W  # in [0.0, W]
+        proj_y *= self.proj_H  # in [0.0, H]
+
+        # round and clamp for use as index
+        proj_x = torch.floor(proj_x)
+        proj_x = torch.minimum((self.proj_W - 1) * torch.ones_like(proj_x), proj_x)
+        proj_x = torch.maximum(torch.zeros_like(proj_x), proj_x).type(torch.long)  # in [0,W-1]
+
+        proj_y = torch.floor(proj_y)
+        proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_y), proj_y)
+        proj_y = torch.maximum(torch.zeros_like(proj_y), proj_y).type(torch.long)  # in [0,H-1]
+
+        # order in decreasing depth
+        indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
+        order = torch.argsort(depth, dim=1, descending=True)
+
+
+        depth = torch.gather(depth, dim=1, index=order)
+        indices = torch.gather(indices, dim=1, index=order)
+        points_x = torch.gather(scan_x, dim=1, index=order)
+        points_y = torch.gather(scan_y, dim=1, index=order)
+        points_z = torch.gather(scan_z, dim=1, index=order)
+        points = torch.stack((points_x, points_y, points_z), dim=1)
+        remission = torch.gather(remissions, dim=1, index=order)
+        proj_y = torch.gather(proj_y, dim=1, index=order)
+        proj_x = torch.gather(proj_x, dim=1, index=order)
+
+        # assign to images
+        for i in range(bs):
+            proj_range[i, proj_y[i, :], proj_x[i, :]] = depth[i]
+            proj_xyz[i,:, proj_y[i, :], proj_x[i, :]] = points[i]
+            proj_remission[i, proj_y[i, :], proj_x[i, :]] = remission[i]
+            proj_idx[i, proj_y[i, :], proj_x[i, :]] = indices[i]
+        proj_mask = (proj_idx > 0).long()
+
+        proj = torch.cat([proj_range.unsqueeze(1),
+                      proj_xyz,
+                      proj_remission.unsqueeze(1)],
+                      dim=1)
+
+        proj = (proj - self.sensor_img_means[None, :, None, None]
+                ) / self.sensor_img_stds[None, :, None, None]
+
+        proj = proj * proj_mask.unsqueeze(1).repeat_interleave(5, dim=1).float()
+
+        return proj, proj_mask, proj_idx
+
+
+    def projection_labels(self, proj_idx, proj_mask, sem_label):
+        mask = proj_idx >= 0
+        bs = proj_idx.shape[0]
+        proj_idx = proj_idx.long()
+        sem_label = sem_label.long()
+        # semantics
+
+        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
+        #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
+
+        for i in range(bs):
+            proj_sem_label[i, mask[i]] = sem_label[i][proj_idx[i][mask[i]]]
+            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
+        #scan.sem_label = self.map(scan.sem_label, self.learning_map)
+
+        proj_sem_label *= proj_mask
+
+        return proj_sem_label
 
     def RandomScaling(self, pcd, r_s=0.05):
         scale = torch.rand(1, device="cuda") * r_s + 1
@@ -721,11 +851,11 @@ class Preprocess(nn.Module):
             remissions[i] = remissions[i][mask]
             sem_label[i] = sem_label[i][mask]
             inst_label[i] = inst_label[i][mask]
-            
+
         pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
         return pcd, remissions, sem_label, inst_label
 
-    
+
     def fov_cal(self, pcd):
         # Calculate the angle per division
         angle_per_division = 360.0 / self.division
@@ -747,14 +877,14 @@ class Preprocess(nn.Module):
             if end_angle > 180.0:
                 end_angle -= 360.0
             division_angles.append((start_angle, end_angle))
-        
+
         index = 0
         # index = torch.randint(0, len(division_angles), (1,)).item()
-        
+
         fov_mask = self.points_basic_filter(pcd, division_angles[index], [-90, 90])
-        
+
         return fov_mask
-    
+
     def points_basic_filter(self, points, h_fov, v_fov):
         """
             filter points based on h,v FOV and x,y,z distance range.
@@ -773,8 +903,8 @@ class Preprocess(nn.Module):
         combined = torch.logical_and(h_points, v_points)
 
         return combined
-    
-     ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+
+    ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
     def hv_in_range(self, m, n, fov, fov_type='h'):
         """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
             horizontal limit = azimuth angle limit
@@ -789,7 +919,7 @@ class Preprocess(nn.Module):
                                     torch.atan2(n, m) > (fov[0] * np.pi / 180))
         else:
             raise NameError("fov type must be set between 'h' and 'v' ")
-    
+
     def point_remove(self, pcd, remissions, sem_label, inst_label):
         pcd = list(torch.unbind(pcd, dim=0))
         remissions = list(torch.unbind(remissions, dim=0))
@@ -803,7 +933,7 @@ class Preprocess(nn.Module):
             remissions[i] = remissions[i][self.mask[i]]
             sem_label[i] = sem_label[i][self.mask[i]]
             inst_label[i] = inst_label[i][self.mask[i]]
-            
+
         return pcd, remissions, sem_label, inst_label
 
     def length_normalize(self, pcd, remissions, sem_label, inst_label):
@@ -821,20 +951,20 @@ class Preprocess(nn.Module):
                 remissions[i] = remissions[i][index]
                 sem_label[i] = sem_label[i][index]
                 inst_label[i] = inst_label[i][index]
-                
-            
+
+
             pcd = torch.stack(pcd, dim=0)
             remissions = torch.stack(remissions, dim=0)
             sem_label = torch.stack(sem_label, dim=0)
             inst_label = torch.stack(inst_label, dim=0)
-            
+
         return pcd, remissions, sem_label, inst_label
-    
-    
+
+
     def old_flip(self, pcd):
         pcd[:, :, 1] = -pcd[:, :, 1]
         return pcd
-    
+
     def old_DA(self, pcd):
         B = pcd.shape[0]
         jitter_x = torch.randn((B,1), device="cuda") * 5
@@ -844,14 +974,110 @@ class Preprocess(nn.Module):
         pcd[:, :, 1] += jitter_y
         pcd[:, :, 2] += jitter_z
         return pcd
-    
+
     def old_rot(self, pcd):
         euler_angle = np.random.normal(0, 90, 1)[0]
         r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
         r_t = torch.from_numpy(r.transpose()).float().to(self.device).squeeze()
         pcd = torch.matmul(pcd, r_t)
         return pcd
-    
+
+    def visualize(self, proj, proj_mask, proj_labels):
+        image = self.make_log_img(proj.cpu().numpy(), proj_mask.cpu().numpy(), proj_labels.cpu().numpy(), self.to_color)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        plt.imshow(image_rgb)
+
+    def forward(self, pcd, remission, sem_label, inst_label):
+        if self.old:
+            pcd, remission, sem_label, inst_label = self.old_augmentation(
+                pcd, remission, sem_label, inst_label)
+        else:
+            pcd, remission, sem_label, inst_label = self.augmentation(
+                pcd, remission, sem_label, inst_label)
+        proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
+        proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
+        self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
+        return proj, proj_mask, proj_labels
+
+    def make_log_img(self, depth, mask, gt, color_fn):
+        # input should be [depth, pred, gt]
+        # make range image (normalized to 0,1 for saving)
+        depth = (cv2.normalize(depth, None, alpha=0, beta=1,
+                               norm_type=cv2.NORM_MINMAX,
+                               dtype=cv2.CV_32F) * 255.0).astype(np.uint8)
+        out_img = cv2.applyColorMap(
+            depth, self.get_mpl_colormap('viridis')) * mask[..., None]
+        # make label gt
+        gt_color = color_fn(gt)
+        out_img = np.concatenate([out_img, gt_color], axis=0)
+        return (out_img).astype(np.uint8)
+
+    def to_color(self, label):
+        # put label in original values
+        label = self.map_old(label, self.learning_map_inv)
+        # put label in color
+        return self.map_old(label, self.color_map)
+
+    @staticmethod
+    def map(label, mapdict):
+        # put label from original values to xentropy
+        # or vice-versa, depending on dictionary values
+        # make learning map a lookup table
+        maxkey = 0
+        for key, data in mapdict.items():
+            if isinstance(data, list):
+                nel = len(data)
+            else:
+                nel = 1
+            if key > maxkey:
+                maxkey = key
+        # +100 hack making lut bigger just in case there are unknown labels
+        if nel > 1:
+            lut = torch.zeros((maxkey + 100, nel), dtype=torch.int32, device='cuda')
+        else:
+            lut = torch.zeros((maxkey + 100), dtype=torch.int32, device='cuda')
+        for key, data in mapdict.items():
+            try:
+                lut[key] = data
+            except IndexError:
+                print("Wrong key ", key)
+        # do the mapping
+        return lut[label]
+
+    @staticmethod
+    def map_old(label, mapdict):
+        # put label from original values to xentropy
+        # or vice-versa, depending on dictionary values
+        # make learning map a lookup table
+        maxkey = 0
+        for key, data in mapdict.items():
+            if isinstance(data, list):
+                nel = len(data)
+            else:
+                nel = 1
+            if key > maxkey:
+                maxkey = key
+        # +100 hack making lut bigger just in case there are unknown labels
+        if nel > 1:
+            lut = np.zeros((maxkey + 100, nel), dtype=np.int32)
+        else:
+            lut = np.zeros((maxkey + 100), dtype=np.int32)
+        for key, data in mapdict.items():
+            try:
+                lut[key] = data
+            except IndexError:
+                print("Wrong key ", key)
+        # do the mapping
+        return lut[label]
+
+    def get_mpl_colormap(self, cmap_name):
+        cmap = plt.get_cmap(cmap_name)
+        # Initialize the matplotlib color map
+        sm = plt.cm.ScalarMappable(cmap=cmap)
+        # Obtain linear color range
+        color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+        return color_range.reshape(256, 1, 3)
+
 if __name__ == "__main__":
     a = [torch.ones((1,20))*0.9] * 10
     a = torch.bernoulli(input=a)
