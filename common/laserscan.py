@@ -597,7 +597,7 @@ class Preprocess(nn.Module):
                  fov_up=3.0,
                  fov_down=-25.0,
                  division=1,
-                 old_aug=False,
+                 old_aug=True,
                  seed=1024) -> None:
         super(Preprocess, self).__init__()
 
@@ -608,6 +608,7 @@ class Preprocess(nn.Module):
         self.learning_map_inv = learning_map_inv
         self.proj_W = sensor["img_prop"]["width"]
         self.proj_H = sensor["img_prop"]["height"]
+        self.proj_W = round((self.proj_W // division) / 64) * 64
         self.sensor_img_means = torch.tensor(sensor["img_means"],
                                          dtype=torch.float,
                                          device="cuda")
@@ -640,21 +641,12 @@ class Preprocess(nn.Module):
 
     def augmentation(self, pcd, remissions, sem_label, inst_label):
         self.mask = self.fov_cal(pcd)
-
-        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
-                                                                   remissions,
-                                                                   sem_label,
-                                                                   inst_label)
         if random.random() < self.aug_prob["point_dropping"]:
-            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
-                                                                         remissions,
-                                                                         sem_label,
-                                                                         inst_label)
-        else:
-            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
-                                                                           remissions,
-                                                                           sem_label,
-                                                                           inst_label)
+            mask_drop = self.RandomDropping(pcd,
+                                            remissions,
+                                            sem_label,
+                                            inst_label)
+            self.mask = self.mask & mask_drop
         if random.random() < self.aug_prob["scaling"]:
             pcd = self.RandomScaling(pcd)
         if random.random() < self.aug_prob["rotation"]:
@@ -668,21 +660,20 @@ class Preprocess(nn.Module):
 
     def old_augmentation(self, pcd, remissions, sem_label, inst_label):
         self.mask = self.fov_cal(pcd)
-        pcd, remissions, sem_label, inst_label = self.point_remove(pcd,
-                                                                   remissions,
-                                                                   sem_label,
-                                                                   inst_label)
+        # TODO: change back to aug_prob["point_dropping"]
         if random.random() < self.aug_prob["point_dropping"]:
-            pcd, remissions, sem_label, inst_label = self.RandomDropping(pcd,
-                                                                         remissions,
-                                                                         sem_label,
-                                                                         inst_label,
-                                                                         r_d=random.uniform(0, 0.5))
-        else:
-            pcd, remissions, sem_label, inst_label = self.length_normalize(pcd,
-                                                                           remissions,
-                                                                           sem_label,
-                                                                           inst_label)
+            mask_drop = self.RandomDropping(pcd,
+                                            remissions,
+                                            sem_label,
+                                            inst_label,
+                                            r_d=random.uniform(0, 0.5))
+            self.mask = self.mask & mask_drop
+            
+        pcd = torch.where(self.mask.unsqueeze(-1).expand(-1, -1, 3), pcd, torch.nan)
+        remissions = torch.where(self.mask, remissions, torch.nan)
+        sem_label = torch.where(self.mask, sem_label, torch.nan)
+        inst_label = torch.where(self.mask, inst_label, torch.nan)
+        
         if random.random() < self.aug_prob["rotation"]:
             pcd = self.old_rot(pcd)
         if random.random() < self.aug_prob["jittering"]:
@@ -692,7 +683,7 @@ class Preprocess(nn.Module):
 
         return pcd, remissions, sem_label, inst_label
 
-    def projection_points(self, pcd, remissions):
+    def projection_points(self, pcd, remissions, sem_label):
         bs = pcd.shape[0]
         # projected range image - [B,H,W] range (-1 is no data)
         proj_range = torch.full((bs, self.proj_H, self.proj_W), -1,
@@ -736,7 +727,10 @@ class Preprocess(nn.Module):
         #self.fov_vert = [-14, 5]
         #fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
 
-        proj_x = abs((yaw) - yaw.min(dim=1)[0].unsqueeze(1)) / abs((yaw.min(dim=1)[0]) - (yaw.max(dim=1)[0])).unsqueeze(1) # using yaw due to varying values for fov_hor
+        yaw_max = torch.max(torch.nan_to_num(yaw, nan=-float('inf')), dim=1)[0]
+        yaw_min = torch.min(torch.nan_to_num(yaw, nan=float('inf')), dim=1)[0]
+        
+        proj_x = abs((yaw) - yaw_min.unsqueeze(1)) / abs(yaw_min - yaw_max).unsqueeze(1) # using yaw due to varying values for fov_hor
         #proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
@@ -746,13 +740,16 @@ class Preprocess(nn.Module):
         # round and clamp for use as index
         proj_x = torch.floor(proj_x)
         proj_x = torch.minimum((self.proj_W - 1) * torch.ones_like(proj_x), proj_x)
-        proj_x = torch.maximum(torch.zeros_like(proj_x), proj_x).type(torch.long)  # in [0,W-1]
-
+        proj_x[proj_x<0] = 0  # in [0,W-1]
+        #proj_x = proj_x.long()
+        
         proj_y = torch.floor(proj_y)
         proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_y), proj_y)
-        proj_y = torch.maximum(torch.zeros_like(proj_y), proj_y).type(torch.long)  # in [0,H-1]
+        proj_y[proj_y<0] = 0  # in [0,H-1]
+        #proj_y = proj_y.long()
 
         # order in decreasing depth
+        depth.nan_to_num_(nan = float('inf'))
         indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
         order = torch.argsort(depth, dim=1, descending=True)
 
@@ -769,10 +766,17 @@ class Preprocess(nn.Module):
 
         # assign to images
         for i in range(bs):
-            proj_range[i, proj_y[i, :], proj_x[i, :]] = depth[i]
-            proj_xyz[i,:, proj_y[i, :], proj_x[i, :]] = points[i]
-            proj_remission[i, proj_y[i, :], proj_x[i, :]] = remission[i]
-            proj_idx[i, proj_y[i, :], proj_x[i, :]] = indices[i]
+            proj_y_curr = proj_y[i, torch.isnan(proj_y[i]) == False].long()
+            proj_x_curr = proj_x[i, torch.isnan(proj_x[i]) == False].long()
+            depth_curr = depth[i, torch.isinf(depth[i]) == False]
+            points_curr = points[i, :, torch.isnan(points[i, 0]) == False]
+            indices_curr = indices[i, torch.isnan(remission[i]) == False]
+            remission_curr = remission[i, torch.isnan(remission[i]) == False]
+
+            proj_range[i, proj_y_curr, proj_x_curr] = depth_curr
+            proj_xyz[i,:, proj_y_curr, proj_x_curr] = points_curr
+            proj_remission[i, proj_y_curr, proj_x_curr] = remission_curr
+            proj_idx[i, proj_y_curr, proj_x_curr] = indices_curr
         proj_mask = (proj_idx > 0).long()
 
         proj = torch.cat([proj_range.unsqueeze(1),
@@ -785,21 +789,36 @@ class Preprocess(nn.Module):
 
         proj = proj * proj_mask.unsqueeze(1).repeat_interleave(5, dim=1).float()
 
-        return proj, proj_mask, proj_idx
+        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
+        #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
+
+        for i in range(bs):
+            sem_label_curr = sem_label[i]
+            mask_label = proj_mask[i].bool()
+            idx_label = proj_idx[i][mask_label]
+            
+            proj_sem_label[i][mask_label] = sem_label_curr[idx_label].long()
+            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
+        proj_sem_label *= proj_mask
+        return proj, proj_mask,  proj_sem_label
 
 
     def projection_labels(self, proj_idx, proj_mask, sem_label):
         mask = proj_idx >= 0
         bs = proj_idx.shape[0]
         proj_idx = proj_idx.long()
-        sem_label = sem_label.long()
+        sem_label = sem_label.detach().clone()
+        proj_idx = proj_idx.detach().clone()
+        proj_mask = proj_mask.detach().clone()
+        #sem_label = sem_label[sem_label.isnan() == False].long()
         # semantics
 
         proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
         #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
 
         for i in range(bs):
-            proj_sem_label[i, mask[i]] = sem_label[i][proj_idx[i][mask[i]]]
+            sem_label_curr = sem_label[i, torch.isnan(sem_label[i]) == False].long()
+            proj_sem_label[i, mask[i]] = sem_label_curr[proj_idx[i][mask[i]]]
             proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
         #scan.sem_label = self.map(scan.sem_label, self.learning_map)
 
@@ -840,16 +859,17 @@ class Preprocess(nn.Module):
         return pcd
 
     def RandomDropping(self, pcd, remissions, sem_label, inst_label , r_d=0.1):
-        for i in range(len(pcd)):
-            L = pcd[i].shape[0]
-            mask = torch.bernoulli(torch.ones(L) * (1 - r_d)).bool()
-            pcd[i] = pcd[i][mask]
-            remissions[i] = remissions[i][mask]
-            sem_label[i] = sem_label[i][mask]
-            inst_label[i] = inst_label[i][mask]
-
-        pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
-        return pcd, remissions, sem_label, inst_label
+        # for i in range(len(pcd)):
+        #     L = pcd[i].shape[0]
+        #     mask = torch.bernoulli(torch.ones(L) * (1 - r_d)).bool()
+        #     pcd[i] = pcd[i][mask]
+        #     remissions[i] = remissions[i][mask]
+        #     sem_label[i] = sem_label[i][mask]
+        #     inst_label[i] = inst_label[i][mask]
+        bs, L = pcd.shape[0:2]
+        mask = torch.bernoulli(torch.ones(bs, L) * (1 - r_d)).bool()
+        #pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
+        return mask.cuda()
 
 
     def fov_cal(self, pcd):
@@ -990,8 +1010,8 @@ class Preprocess(nn.Module):
         else:
             pcd, remission, sem_label, inst_label = self.augmentation(
                 pcd, remission, sem_label, inst_label)
-        proj, proj_mask, proj_idx = self.projection_points(pcd, remission)
-        proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
+        proj, proj_mask, proj_labels = self.projection_points(pcd, remission, sem_label)
+        #proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
         self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
         return proj, proj_mask, proj_labels
 

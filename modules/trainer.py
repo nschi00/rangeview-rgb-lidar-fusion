@@ -167,7 +167,8 @@ class Trainer():
                                      learning_map=DATA["learning_map"],
                                      learning_map_inv=DATA["learning_map_inv"],
                                      sensor=self.ARCH["dataset"]["sensor"],
-                                     old_aug=True)
+                                     old_aug=True,
+                                     division=self.ARCH["train"]["division"])
         # weights for loss (and bias)
 
         
