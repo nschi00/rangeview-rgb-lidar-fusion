@@ -7,6 +7,7 @@ import cv2
 from PIL import Image, ImageDraw
 import torch
 import torch.nn as nn
+import time
 import matplotlib.pyplot as plt
 
 class LaserScan:
@@ -740,39 +741,40 @@ class Preprocess(nn.Module):
         #proj_y = proj_y.long()
 
         # order in decreasing depth
-        depth.nan_to_num_(nan = float('inf'))
-        indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
-        order = torch.argsort(depth, dim=1, descending=True)
-        # calculate time
-        depth = depth[order]
-        depth = torch.gather(depth, dim=1, index=order)
-        indices = torch.gather(indices, dim=1, index=order)
-        points_x = torch.gather(scan_x, dim=1, index=order)
-        points_y = torch.gather(scan_y, dim=1, index=order)
-        points_z = torch.gather(scan_z, dim=1, index=order)
-        points = torch.stack((points_x, points_y, points_z), dim=1)
-        remission = torch.gather(remissions, dim=1, index=order)
-        proj_y = torch.gather(proj_y, dim=1, index=order)
-        proj_x = torch.gather(proj_x, dim=1, index=order)
+
+
         proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
         # assign to images
+        #points = []
+        # start_time = time.time()
         for i in range(bs):
-            proj_y_curr = proj_y[i, ~torch.isnan(proj_y[i])].long()
-            proj_x_curr = proj_x[i, ~torch.isnan(proj_x[i])].long()
-            depth_curr = depth[i, ~torch.isinf(depth[i])]
-            points_curr = points[i, :, ~torch.isnan(points[i, 0])]
-            indices_curr = indices[i, ~torch.isnan(remission[i])]
-            remission_curr = remission[i, ~torch.isnan(remission[i])]
-
-            proj_range[i, proj_y_curr, proj_x_curr] = depth_curr
-            proj_xyz[i,:, proj_y_curr, proj_x_curr] = points_curr
-            proj_remission[i, proj_y_curr, proj_x_curr] = remission_curr
-            proj_idx[i, proj_y_curr, proj_x_curr] = indices_curr
+            non_nan_indices = torch.nonzero(~torch.isnan(depth[i])).squeeze()
+            depth_without_nan = depth[i, non_nan_indices]
+            order = torch.argsort(depth_without_nan, descending=True)
+            depth_without_nan_sorted = depth_without_nan[order]
+            non_nan_indices_sorted = non_nan_indices[order]
+            
+            remission = remissions[i, non_nan_indices_sorted]
+            points_x = scan_x[i, non_nan_indices_sorted]
+            points_y = scan_y[i, non_nan_indices_sorted]
+            points_z = scan_z[i, non_nan_indices_sorted]
+            points = torch.stack((points_x, points_y, points_z), dim=0)
+            proj_y_i = proj_y[i, non_nan_indices_sorted].long()
+            proj_x_i = proj_x[i, non_nan_indices_sorted].long()
+            
+            proj_range[i, proj_y_i, proj_x_i] = depth_without_nan_sorted
+            proj_xyz[i,:, proj_y_i, proj_x_i] = points
+            proj_remission[i, proj_y_i, proj_x_i] = remission
+            proj_idx[i, proj_y_i, proj_x_i] = non_nan_indices_sorted
             
             # ! I dont't understand why this works, but it does
             proj_mask = (proj_idx[i] > 0).bool()
             proj_sem_label[i][proj_mask] = sem_label[i][proj_idx[i][proj_mask]].long()
             proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
+            
+        # end_time = time.time()
+        # execution_time = end_time - start_time
+        # print(execution_time)
         proj_mask = (proj_idx > 0).long()
 
         proj = torch.cat([proj_range.unsqueeze(1),
