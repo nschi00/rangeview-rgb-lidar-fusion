@@ -730,12 +730,12 @@ class Preprocess(nn.Module):
 
         # round and clamp for use as index
         proj_x = torch.floor(proj_x)
-        proj_x = torch.minimum((self.proj_W - 1) * torch.ones_like(proj_x), proj_x)
+        proj_x[proj_x >= self.proj_W - 1] = self.proj_W - 1
         proj_x[proj_x<0] = 0  # in [0,W-1]
         #proj_x = proj_x.long()
         
         proj_y = torch.floor(proj_y)
-        proj_y = torch.minimum((self.proj_H - 1) * torch.ones_like(proj_y), proj_y)
+        proj_y[proj_y >= self.proj_H - 1] = self.proj_H - 1
         proj_y[proj_y<0] = 0  # in [0,H-1]
         #proj_y = proj_y.long()
 
@@ -743,7 +743,8 @@ class Preprocess(nn.Module):
         depth.nan_to_num_(nan = float('inf'))
         indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
         order = torch.argsort(depth, dim=1, descending=True)
-
+        # calculate time
+        depth = depth[order]
         depth = torch.gather(depth, dim=1, index=order)
         indices = torch.gather(indices, dim=1, index=order)
         points_x = torch.gather(scan_x, dim=1, index=order)
@@ -922,11 +923,11 @@ class Preprocess(nn.Module):
                 pcd, remission, sem_label, inst_label)
         proj, proj_mask, proj_labels = self.projection_points(pcd, remission, sem_label)
 
-        self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
-        self.visualize(proj[1][0], proj_mask[1], proj_labels[1])
-        self.visualize(proj[2][0], proj_mask[2], proj_labels[2])
-        self.visualize(proj[3][0], proj_mask[3], proj_labels[3])
-        self.visualize(proj[4][0], proj_mask[4], proj_labels[4])
+        # self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
+        # self.visualize(proj[1][0], proj_mask[1], proj_labels[1])
+        # self.visualize(proj[2][0], proj_mask[2], proj_labels[2])
+        # self.visualize(proj[3][0], proj_mask[3], proj_labels[3])
+        # self.visualize(proj[4][0], proj_mask[4], proj_labels[4])
         return proj, proj_mask, proj_labels
 
     def make_log_img(self, depth, mask, gt, color_fn):
