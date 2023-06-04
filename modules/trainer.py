@@ -166,7 +166,8 @@ class Trainer():
         self.preprocess = Preprocess(color_map=DATA["color_map"],
                                      learning_map=DATA["learning_map"],
                                      learning_map_inv=DATA["learning_map_inv"],
-                                     sensor=self.ARCH["dataset"]["sensor"])
+                                     sensor=self.ARCH["dataset"]["sensor"],
+                                     old_aug=True)
         # weights for loss (and bias)
 
         
@@ -437,15 +438,13 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            pcd, remission, sem_label, inst_label = proj_data
-            pcd = self.preprocess.forward(pcd.cuda(), remission.cuda(), sem_label.cuda(), inst_label.cuda())
-            in_vol, proj_mask, proj_labels = proj_data[0:3]
+            pcd, remission, sem_label, inst_label, path = proj_data
+            in_vol, proj_mask, proj_labels = self.preprocess(pcd.cuda(), 
+                                                             remission.cuda(), 
+                                                             sem_label.cuda(), 
+                                                             inst_label.cuda())
             # measure data loading time
             self.data_time_t.update(time.time() - end)
-            if not self.multi_gpu and self.gpu:
-                in_vol = in_vol.cuda()
-            if self.gpu:
-                proj_labels = proj_labels.cuda().long()
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
@@ -457,13 +456,13 @@ class Trainer():
                 # SUM POSITION LOSSES
                 for j in range(len(out)):
                     if j == 0:
-                        bdlosss = self.bd(out[j], proj_labels.long())
+                        bdlosss = self.bd(out[j], proj_labels)
                         loss_mn = self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels)
                     else:
-                        bdlosss += lamda * self.bd(out[j], proj_labels.long())
+                        bdlosss += lamda * self.bd(out[j], proj_labels)
                         loss_mn += lamda * self.criterion(torch.log(out[j].clamp(
-                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                            min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels)
 
                 loss_m = loss_mn + bdlosss
                 output = out[0]

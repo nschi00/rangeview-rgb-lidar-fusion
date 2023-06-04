@@ -511,10 +511,10 @@ class Parser():
 
     def collate_fn(batch):
       batch_zip = list(zip(*batch))
-      rgb = list(zip(*batch_zip[1]))
+      rgb = list(batch_zip[1])
       lidar = list(zip(*batch_zip[0]))
 
-      pcd, remission, sem_label, ins_label = [list(x) for x in lidar]
+      pcd, remission, sem_label, ins_label, path = [list(x) for x in lidar]
 
       min_length = min(len(arr) for arr in pcd)
       for i in range(len(pcd)):
@@ -536,8 +536,9 @@ class Parser():
       remission = torch.from_numpy(remission)
       sem_label = torch.from_numpy(sem_label)
       ins_label = torch.from_numpy(ins_label)
+      rgb = torch.stack(rgb, dim=0)
 
-      return [pcd, remission, sem_label, ins_label], rgb
+      return [pcd, remission, sem_label, ins_label, path], rgb
     
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
                                                    batch_size=self.batch_size,
