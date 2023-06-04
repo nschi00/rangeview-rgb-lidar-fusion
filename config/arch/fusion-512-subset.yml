@@ -5,10 +5,10 @@ train:
   pipeline: "fusion" #  "res" "fid" "hard"
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
-  aux_loss: False
+  aux_loss: True
   subset_ratio: 0.25  # share of data used for training; overfit has to be false
   lamda: 1.0
-  batch_size: 6 # batch size
+  batch_size: 1 # batch size
   report_epoch: 1 # every x epochs, report validation set
   epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)
   save_summary: False # Summary of weight histograms for tensorboard   Must false since not check the api
@@ -39,7 +39,7 @@ optimizer:
     dampening: 0
     nesterov: False
 scheduler:
-  Name: OneCycleLR # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
+  Name: CosineAnnealingWarmupRestarts # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
   CosineAnnealingWarmupRestarts:
     first_cycle_steps : 50
     warmup_steps : 1
@@ -105,7 +105,7 @@ dataset:
     fov_up: 3
     fov_down: -25
     img_prop:
-      width: 128
+      width: 512
       height: 64
     img_means: #range,x,y,z,signal
       - 11.71279

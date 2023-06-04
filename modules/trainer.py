@@ -197,7 +197,7 @@ class Trainer():
                 self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
                                                       aux=self.ARCH["train"]["aux_loss"])
 
-        self.optim = Optim(self.model, ARCH["optimizer"], None, self.parser.get_train_size())
+        self.optim = Optim(self.model, ARCH["optimizer"], ARCH["scheduler"], self.parser.get_train_size())
         #self.optim.visualize()
 
         save_to_log(self.log, 'model.txt', str(self.model))

@@ -137,19 +137,19 @@ class Fusion(nn.Module):
             x_rgb_features[str(i)] = F.interpolate(
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
-        x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
+        x_lidar_features_cat = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
         x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
-        out = self.fusion_layer(x_lidar_features, x_rgb_features)
-        out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
+        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features)
+        out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
 
-        # if self.aux:
-        #     out = [out]
-        #     for i in range(2, 5):
-        #         out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
-        #         out[-1] = F.softmax(out[-1], dim=1)
+        if self.aux:
+            out = [out]
+            for i in range(2, 5):
+                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+                out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
@@ -246,8 +246,8 @@ class SwinFusion(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
-        # num_patches = int(32768 / 4)  ###TODO: change to image size multiplication
-        num_patches = 12288
+        num_patches = 32768  ###TODO: change to image size multiplication
+        # num_patches = 12288
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
@@ -369,13 +369,6 @@ class SwinFusion(nn.Module):
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table'}
-
-    def check_image_size(self, x):
-        _, _, h, w = x.size()
-        mod_pad_h = (self.window_size - h % self.window_size) % self.window_size
-        mod_pad_w = (self.window_size - w % self.window_size) % self.window_size
-        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
-        return x
 
     def forward_features_Fusion(self, x, y):
         x_size = (x.shape[2], x.shape[3])
