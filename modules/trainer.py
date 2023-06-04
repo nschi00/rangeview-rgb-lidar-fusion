@@ -443,7 +443,8 @@ class Trainer():
             in_vol, proj_mask, proj_labels = self.preprocess(pcd.cuda(), 
                                                              remission.cuda(), 
                                                              sem_label.cuda(), 
-                                                             inst_label.cuda())
+                                                             inst_label.cuda(),
+                                                             train=True)
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             rgb_data = rgb_data.cuda()
@@ -557,12 +558,12 @@ class Trainer():
         with torch.no_grad():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
-                in_vol, proj_mask, proj_labels = proj_data[0:3]
-                if not self.multi_gpu and self.gpu:
-                    in_vol = in_vol.cuda()
-                    proj_mask = proj_mask.cuda()
-                if self.gpu:
-                    proj_labels = proj_labels.cuda(non_blocking=True).long()
+                pcd, remission, sem_label, inst_label, path = proj_data
+                in_vol, proj_mask, proj_labels = self.preprocess(pcd.cuda(), 
+                                                             remission.cuda(), 
+                                                             sem_label.cuda(), 
+                                                             inst_label.cuda(),
+                                                             train=False)
                 rgb_data = rgb_data.cuda()
                 # compute output
                 output = self.model(in_vol, rgb_data)

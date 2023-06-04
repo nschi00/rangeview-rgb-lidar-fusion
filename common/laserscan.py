@@ -916,13 +916,14 @@ class Preprocess(nn.Module):
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         plt.imshow(image_rgb)
 
-    def forward(self, pcd, remission, sem_label, inst_label):
-        if self.old:
-            pcd, remission, sem_label, inst_label = self.old_augmentation(
-                pcd, remission, sem_label, inst_label)
-        else:
-            pcd, remission, sem_label, inst_label = self.augmentation(
-                pcd, remission, sem_label, inst_label)
+    def forward(self, pcd, remission, sem_label, inst_label, train=True):
+        if train:
+            if self.old:
+                pcd, remission, sem_label, inst_label = self.old_augmentation(
+                    pcd, remission, sem_label, inst_label)
+            else:
+                pcd, remission, sem_label, inst_label = self.augmentation(
+                    pcd, remission, sem_label, inst_label)
         proj, proj_mask, proj_labels = self.projection_points(pcd, remission, sem_label)
 
         # self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
