@@ -657,18 +657,18 @@ class Preprocess(nn.Module):
         return pcd, remissions, sem_label, inst_label
 
     def old_augmentation(self, pcd, remissions, sem_label, inst_label):
+        self.mask = self.fov_cal(pcd)
+        if random.random() < self.aug_prob["point_dropping"]:
+            mask_drop = self.RandomDropping(pcd,
+                                        r_d=random.uniform(0, 0.5))
+        self.mask = self.mask & mask_drop
         if random.random() < self.aug_prob["rotation"]:
             pcd = self.old_rot(pcd)
         if random.random() < self.aug_prob["jittering"]:
             pcd = self.old_DA(pcd)
         if random.random() < self.aug_prob["flipping"]:
             pcd = self.old_flip(pcd)
-        self.mask = self.fov_cal(pcd)
-        if random.random() < self.aug_prob["point_dropping"]:
-            mask_drop = self.RandomDropping(pcd,
-                                            r_d=random.uniform(0, 0.5))
-            self.mask = self.mask & mask_drop
-            
+       
         pcd = torch.where(self.mask.unsqueeze(-1).expand(-1, -1, 3), pcd, torch.nan)
         remissions = torch.where(self.mask, remissions, torch.nan)
         sem_label = torch.where(self.mask, sem_label, torch.nan)
@@ -905,9 +905,12 @@ class Preprocess(nn.Module):
         return pcd
 
     def old_rot(self, pcd):
-        euler_angle = np.random.normal(0, 90, 1)[0]
-        r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
-        r_t = torch.from_numpy(r.transpose()).float().to(self.device).squeeze()
+        B = pcd.shape[0]
+        euler_angles = np.random.normal(0, 90, B)
+        r = [np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+             for euler_angle in euler_angles]
+        r_t = torch.from_numpy(np.stack(r)).transpose(1, 2).float().squeeze().to(self.device)  
+        #r_t = torch.from_numpy(r.transpose()).float().to(self.device).squeeze()
         pcd = torch.matmul(pcd, r_t)
         return pcd
 
