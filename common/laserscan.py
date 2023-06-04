@@ -661,7 +661,7 @@ class Preprocess(nn.Module):
         if random.random() < self.aug_prob["point_dropping"]:
             mask_drop = self.RandomDropping(pcd,
                                         r_d=random.uniform(0, 0.5))
-        self.mask = self.mask & mask_drop
+            self.mask = self.mask & mask_drop
         if random.random() < self.aug_prob["rotation"]:
             pcd = self.old_rot(pcd)
         if random.random() < self.aug_prob["jittering"]:
