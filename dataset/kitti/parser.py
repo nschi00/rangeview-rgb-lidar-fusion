@@ -556,7 +556,8 @@ class Parser():
                                                    batch_size=self.batch_size,
                                                    shuffle=False,
                                                    num_workers=self.workers,
-                                                   drop_last=True)
+                                                   drop_last=True,
+                                                   collate_fn=collate_fn)
     assert len(self.validloader) > 0
     self.validiter = iter(self.validloader)
 
@@ -575,7 +576,8 @@ class Parser():
                                                     batch_size=self.batch_size,
                                                     shuffle=False,
                                                     num_workers=self.workers,
-                                                    drop_last=True)
+                                                    drop_last=True,
+                                                    collate_fn=collate_fn)
 #       assert len(self.testloader) > 0
       self.testiter = iter(self.testloader)
 
