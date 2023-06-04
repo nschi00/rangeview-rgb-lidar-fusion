@@ -640,13 +640,6 @@ class Preprocess(nn.Module):
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     def augmentation(self, pcd, remissions, sem_label, inst_label):
-        self.mask = self.fov_cal(pcd)
-        if random.random() < self.aug_prob["point_dropping"]:
-            mask_drop = self.RandomDropping(pcd,
-                                            remissions,
-                                            sem_label,
-                                            inst_label)
-            self.mask = self.mask & mask_drop
         if random.random() < self.aug_prob["scaling"]:
             pcd = self.RandomScaling(pcd)
         if random.random() < self.aug_prob["rotation"]:
@@ -655,17 +648,23 @@ class Preprocess(nn.Module):
             pcd = self.RandomJittering(pcd)
         if random.random() < self.aug_prob["flipping"]:
             pcd = self.RandomFlipping(pcd)
-
+        self.mask = self.fov_cal(pcd)
+        if random.random() < self.aug_prob["point_dropping"]:
+            mask_drop = self.RandomDropping(pcd,
+                                            r_d=0.1)
+            self.mask = self.mask & mask_drop
         return pcd, remissions, sem_label, inst_label
 
     def old_augmentation(self, pcd, remissions, sem_label, inst_label):
+        if random.random() < self.aug_prob["rotation"]:
+            pcd = self.old_rot(pcd)
+        if random.random() < self.aug_prob["jittering"]:
+            pcd = self.old_DA(pcd)
+        if random.random() < self.aug_prob["flipping"]:
+            pcd = self.old_flip(pcd)
         self.mask = self.fov_cal(pcd)
-        # TODO: change back to aug_prob["point_dropping"]
         if random.random() < self.aug_prob["point_dropping"]:
             mask_drop = self.RandomDropping(pcd,
-                                            remissions,
-                                            sem_label,
-                                            inst_label,
                                             r_d=random.uniform(0, 0.5))
             self.mask = self.mask & mask_drop
             
@@ -673,14 +672,6 @@ class Preprocess(nn.Module):
         remissions = torch.where(self.mask, remissions, torch.nan)
         sem_label = torch.where(self.mask, sem_label, torch.nan)
         inst_label = torch.where(self.mask, inst_label, torch.nan)
-        
-        if random.random() < self.aug_prob["rotation"]:
-            pcd = self.old_rot(pcd)
-        if random.random() < self.aug_prob["jittering"]:
-            pcd = self.old_DA(pcd)
-        if random.random() < self.aug_prob["flipping"]:
-            pcd = self.old_flip(pcd)
-
         return pcd, remissions, sem_label, inst_label
 
     def projection_points(self, pcd, remissions, sem_label):
@@ -753,7 +744,6 @@ class Preprocess(nn.Module):
         indices = torch.arange(depth.shape[1], device="cuda").repeat((1, bs)).reshape(bs, -1)
         order = torch.argsort(depth, dim=1, descending=True)
 
-
         depth = torch.gather(depth, dim=1, index=order)
         indices = torch.gather(indices, dim=1, index=order)
         points_x = torch.gather(scan_x, dim=1, index=order)
@@ -763,20 +753,25 @@ class Preprocess(nn.Module):
         remission = torch.gather(remissions, dim=1, index=order)
         proj_y = torch.gather(proj_y, dim=1, index=order)
         proj_x = torch.gather(proj_x, dim=1, index=order)
-
+        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
         # assign to images
         for i in range(bs):
-            proj_y_curr = proj_y[i, torch.isnan(proj_y[i]) == False].long()
-            proj_x_curr = proj_x[i, torch.isnan(proj_x[i]) == False].long()
-            depth_curr = depth[i, torch.isinf(depth[i]) == False]
-            points_curr = points[i, :, torch.isnan(points[i, 0]) == False]
-            indices_curr = indices[i, torch.isnan(remission[i]) == False]
-            remission_curr = remission[i, torch.isnan(remission[i]) == False]
+            proj_y_curr = proj_y[i, ~torch.isnan(proj_y[i])].long()
+            proj_x_curr = proj_x[i, ~torch.isnan(proj_x[i])].long()
+            depth_curr = depth[i, ~torch.isinf(depth[i])]
+            points_curr = points[i, :, ~torch.isnan(points[i, 0])]
+            indices_curr = indices[i, ~torch.isnan(remission[i])]
+            remission_curr = remission[i, ~torch.isnan(remission[i])]
 
             proj_range[i, proj_y_curr, proj_x_curr] = depth_curr
             proj_xyz[i,:, proj_y_curr, proj_x_curr] = points_curr
             proj_remission[i, proj_y_curr, proj_x_curr] = remission_curr
             proj_idx[i, proj_y_curr, proj_x_curr] = indices_curr
+            
+            # ! I dont't understand why this works, but it does
+            proj_mask = (proj_idx[i] > 0).bool()
+            proj_sem_label[i][proj_mask] = sem_label[i][proj_idx[i][proj_mask]].long()
+            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
         proj_mask = (proj_idx > 0).long()
 
         proj = torch.cat([proj_range.unsqueeze(1),
@@ -788,43 +783,8 @@ class Preprocess(nn.Module):
                 ) / self.sensor_img_stds[None, :, None, None]
 
         proj = proj * proj_mask.unsqueeze(1).repeat_interleave(5, dim=1).float()
-
-        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
-        #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
-
-        for i in range(bs):
-            sem_label_curr = sem_label[i]
-            mask_label = proj_mask[i].bool()
-            idx_label = proj_idx[i][mask_label]
-            
-            proj_sem_label[i][mask_label] = sem_label_curr[idx_label].long()
-            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
         proj_sem_label *= proj_mask
         return proj, proj_mask,  proj_sem_label
-
-
-    def projection_labels(self, proj_idx, proj_mask, sem_label):
-        mask = proj_idx >= 0
-        bs = proj_idx.shape[0]
-        proj_idx = proj_idx.long()
-        sem_label = sem_label.detach().clone()
-        proj_idx = proj_idx.detach().clone()
-        proj_mask = proj_mask.detach().clone()
-        #sem_label = sem_label[sem_label.isnan() == False].long()
-        # semantics
-
-        proj_sem_label = torch.zeros((bs, self.proj_H, self.proj_W), device="cuda", dtype=torch.int64)
-        #proj_sem_color = torch.zeros((bs, self.proj_H, self.proj_W, 3), device="cuda", dtype=torch.float32)
-
-        for i in range(bs):
-            sem_label_curr = sem_label[i, torch.isnan(sem_label[i]) == False].long()
-            proj_sem_label[i, mask[i]] = sem_label_curr[proj_idx[i][mask[i]]]
-            proj_sem_label[i] = self.map(proj_sem_label[i], self.learning_map)
-        #scan.sem_label = self.map(scan.sem_label, self.learning_map)
-
-        proj_sem_label *= proj_mask
-
-        return proj_sem_label
 
     def RandomScaling(self, pcd, r_s=0.05):
         scale = torch.rand(1, device="cuda") * r_s + 1
@@ -858,19 +818,10 @@ class Preprocess(nn.Module):
             pcd[:, :2] = -pcd[:, :2]
         return pcd
 
-    def RandomDropping(self, pcd, remissions, sem_label, inst_label , r_d=0.1):
-        # for i in range(len(pcd)):
-        #     L = pcd[i].shape[0]
-        #     mask = torch.bernoulli(torch.ones(L) * (1 - r_d)).bool()
-        #     pcd[i] = pcd[i][mask]
-        #     remissions[i] = remissions[i][mask]
-        #     sem_label[i] = sem_label[i][mask]
-        #     inst_label[i] = inst_label[i][mask]
+    def RandomDropping(self, pcd, r_d=0.1):
         bs, L = pcd.shape[0:2]
         mask = torch.bernoulli(torch.ones(bs, L) * (1 - r_d)).bool()
-        #pcd, remissions, sem_label, inst_label = self.length_normalize(pcd, remissions, sem_label, inst_label)
         return mask.cuda()
-
 
     def fov_cal(self, pcd):
         # Calculate the angle per division
@@ -936,47 +887,6 @@ class Preprocess(nn.Module):
         else:
             raise NameError("fov type must be set between 'h' and 'v' ")
 
-    def point_remove(self, pcd, remissions, sem_label, inst_label):
-        pcd = list(torch.unbind(pcd, dim=0))
-        remissions = list(torch.unbind(remissions, dim=0))
-        sem_label = list(torch.unbind(sem_label, dim=0))
-        inst_label = list(torch.unbind(inst_label, dim=0))
-        B, N = self.mask.shape
-        if B * N == torch.sum(self.mask):
-            return pcd, remissions, sem_label, inst_label
-        for i in range(len(pcd)):
-            pcd[i] = pcd[i][self.mask[i]]
-            remissions[i] = remissions[i][self.mask[i]]
-            sem_label[i] = sem_label[i][self.mask[i]]
-            inst_label[i] = inst_label[i][self.mask[i]]
-
-        return pcd, remissions, sem_label, inst_label
-
-    def length_normalize(self, pcd, remissions, sem_label, inst_label):
-        try:
-            pcd = torch.stack(pcd, dim=0)
-            remissions = torch.stack(remissions, dim=0)
-            sem_label = torch.stack(sem_label, dim=0)
-            inst_label = torch.stack(inst_label, dim=0)
-        except:
-            min_length = min(len(arr) for arr in pcd)
-            for i in range(len(pcd)):
-                current_length = len(pcd[i])
-                index = np.random.choice(range(current_length), min_length, replace=False)
-                pcd[i] = pcd[i][index,:]
-                remissions[i] = remissions[i][index]
-                sem_label[i] = sem_label[i][index]
-                inst_label[i] = inst_label[i][index]
-
-
-            pcd = torch.stack(pcd, dim=0)
-            remissions = torch.stack(remissions, dim=0)
-            sem_label = torch.stack(sem_label, dim=0)
-            inst_label = torch.stack(inst_label, dim=0)
-
-        return pcd, remissions, sem_label, inst_label
-
-
     def old_flip(self, pcd):
         pcd[:, :, 1] = -pcd[:, :, 1]
         return pcd
@@ -1011,8 +921,12 @@ class Preprocess(nn.Module):
             pcd, remission, sem_label, inst_label = self.augmentation(
                 pcd, remission, sem_label, inst_label)
         proj, proj_mask, proj_labels = self.projection_points(pcd, remission, sem_label)
-        #proj_labels = self.projection_labels(proj_idx, proj_mask, sem_label)
+
         self.visualize(proj[0][0], proj_mask[0], proj_labels[0])
+        self.visualize(proj[1][0], proj_mask[1], proj_labels[1])
+        self.visualize(proj[2][0], proj_mask[2], proj_labels[2])
+        self.visualize(proj[3][0], proj_mask[3], proj_labels[3])
+        self.visualize(proj[4][0], proj_mask[4], proj_labels[4])
         return proj, proj_mask, proj_labels
 
     def make_log_img(self, depth, mask, gt, color_fn):
