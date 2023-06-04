@@ -141,7 +141,7 @@ class Trainer():
                      "best_train_iou": 0,
                      "best_val_iou": 0}
 
-
+        assert self.ARCH["train"]["division"] != 0, "division by zero is not allowed"
         # get the data
         self.parser = Parser(root=self.datadir,
                              # DATA["split"]["valid"] + DATA["split"]["train"] if finetune with valid
