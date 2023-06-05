@@ -7,8 +7,7 @@ from shutil import copyfile
 import yaml
 import os
 from modules.trainer import Trainer
-import sys
-#sys.path.append('/home/son/project/praktikum/CENet-fusion/modules/network')
+
 
 if __name__ == '__main__':
 
@@ -39,7 +38,7 @@ if __name__ == '__main__':
         '--arch_cfg', '-ac',
         type=str,
         required=False,
-        default='config/arch/fusion-512-OV.yml',
+        default='config/arch/senet-512-subset.yml',
         help='Architecture yaml cfg file. See /config/arch for sample. No default!',
     )
     parser.add_argument(

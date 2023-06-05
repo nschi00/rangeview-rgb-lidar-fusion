@@ -15,9 +15,39 @@ from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
-
+from modules.network.ResNet import ResNet_34
 from tqdm import tqdm
 
+def get_Optim(model, optimizer_cfg, scheduler_cfg = None, iter_per_epoch = None):
+    optim_name = optimizer_cfg["Name"]
+    optimizer = eval("optim." + optim_name)
+    try:
+        fusion_params = model.fusion_layer.parameters()
+    except:
+        fusion_params = []
+    rest_params = [p for n, p in model.named_parameters() if "fusion_layer" not in n]
+
+    total_iter = iter_per_epoch * optimizer_cfg["max_epochs"]
+    # * F&B_mutiplier set to 1.0 will train all parameters with the same learning rate
+    optimizer = optimizer(model.parameters(), **optimizer_cfg[optim_name])
+
+    # * Set up scheduler if needed
+    if scheduler_cfg is not None and scheduler_cfg["Name"] != "None":
+        name = scheduler_cfg["Name"]
+        if name == "CosineAnnealingWarmupRestarts":
+            scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
+            scheduler_cfg[name]["first_cycle_steps"] = iter_per_epoch * scheduler_cfg[name]["first_cycle_steps"]
+            scheduler_cfg[name]["warmup_steps"] = iter_per_epoch * scheduler_cfg[name]["warmup_steps"]
+        elif name == "OneCycleLR":
+            scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
+            scheduler_cfg[name]["total_steps"] = total_iter
+        scheduler = eval(name)
+        scheduler = scheduler(optimizer, **scheduler_cfg[name])
+    else:
+        # * If no scheduler is needed, set up a dummy scheduler
+        scheduler = optim.lr_scheduler.ConstantLR(optimizer, factor=1, total_iters=1)
+
+    return optimizer, scheduler
 
 
 def save_to_log(logdir, logfile, message):
@@ -31,7 +61,7 @@ def save_checkpoint(to_save, logdir, suffix=".pth"):
     # Save the weights
     torch.save(to_save, logdir +
                "/SENet" + suffix)
-    
+
 def convert_relu_to_softplus(model, act):
     for child_name, child in model.named_children():
         if isinstance(child, nn.LeakyReLU):
@@ -81,8 +111,7 @@ class Trainer():
                                           workers=self.ARCH["train"]["workers"],
                                           gt=True,
                                           shuffle_train=True,
-                                          overfit= self.ARCH["train"]["overfit"],
-                                          share_subset_train=self.ARCH["train"]["share_subset_train"])
+                                          subset_ratio=self.ARCH["train"]["subset_ratio"])
 
         # weights for loss (and bias)
 
@@ -101,44 +130,18 @@ class Trainer():
         print("Loss weights from content: ", self.loss_w.data)
 
         with torch.no_grad():
-            if self.ARCH["train"]["pipeline"] == "hardnet":
-                from modules.network.HarDNet import HarDNet
-                self.model = HarDNet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
+            activation = eval("nn." + self.ARCH["train"]["act"] + "()")
             if self.ARCH["train"]["pipeline"] == "res":
-                from modules.network.ResNet import ResNet_34
                 self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
-            
-            if self.ARCH["train"]["pipeline"] == "fusion":
-                from modules.network.Fusion import Fusion_with_resnet
-                self.model = Fusion_with_resnet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"], use_att=self.ARCH["fusion"]["use_att"],
-                                                fusion_scale=self.ARCH["fusion"]["fuse_all"], name_backbone=self.ARCH["fusion"]["name_backbone"],
-                                                branch_type=self.ARCH["fusion"]["branch_type"], stage=self.ARCH["fusion"]["stage"])
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
-
-            if self.ARCH["train"]["pipeline"] == "fid":
-                from modules.network.Fid import ResNet_34
-                self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
-                if self.ARCH["train"]["act"] == "Hardswish":
-                    convert_relu_to_softplus(self.model, nn.Hardswish())
-                elif self.ARCH["train"]["act"] == "SiLU":
-                    convert_relu_to_softplus(self.model, nn.SiLU())
+                convert_relu_to_softplus(self.model, activation)
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
         print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"], 
-                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv", 
-                                    self.ARCH["fusion"]["fuse_all"], 
+        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"],
+                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv",
+                                    self.ARCH["fusion"]["fuse_all"],
                                     "" if self.ARCH["train"]["aux_loss"] else "noaux"))
         if self.ARCH["fusion"]["name_backbone"] == "mask2former":
             print("{}_{}".format(self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
@@ -170,7 +173,6 @@ class Trainer():
             self.multi_gpu = True
             self.n_gpus = torch.cuda.device_count()
 
-
         self.criterion = nn.NLLLoss(weight=self.loss_w).to(self.device)
         self.ls = Lovasz_softmax(ignore=0).to(self.device)
         from modules.losses.boundary_loss import BoundaryLoss
@@ -180,49 +182,22 @@ class Trainer():
             self.criterion = nn.DataParallel(self.criterion).cuda()  # spread in gpus
             self.ls = nn.DataParallel(self.ls).cuda()
 
-        """
-        TODO: create different optimizers and schedulers for different part of the model
-        Example:
-        backbone can be retrained with a lower learning rate
-        main resnet model prefer cosine annealing with max lr = 0.01
-        swin fusion prefer adam with MULTISTEPLR (need to check document)
-        """
-        if self.ARCH["train"]["scheduler"] == "consine":
-            length = self.parser.get_train_size()
-            dict = self.ARCH["train"]["consine"]
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=dict["min_lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            self.scheduler = CosineAnnealingWarmUpRestarts(optimizer=self.optimizer,
-                                                           T_0=dict["first_cycle"] * length, T_mult=dict["cycle"],
-                                                           eta_max=dict["max_lr"],
-                                                           T_up=dict["wup_epochs"]*length, gamma=dict["gamma"])
-
-        else:
-            self.optimizer = optim.SGD(self.model.parameters(),
-                                       lr=self.ARCH["train"]["decay"]["lr"],
-                                       momentum=self.ARCH["train"]["momentum"],
-                                       weight_decay=self.ARCH["train"]["w_decay"])
-            steps_per_epoch = self.parser.get_train_size()
-            up_steps = int(self.ARCH["train"]["decay"]["wup_epochs"] * steps_per_epoch)
-            final_decay = self.ARCH["train"]["decay"]["lr_decay"] ** (1 / steps_per_epoch)
-            self.scheduler = warmupLR(optimizer=self.optimizer,
-                                      lr=self.ARCH["train"]["decay"]["lr"],
-                                      warmup_steps=up_steps,
-                                      momentum=self.ARCH["train"]["momentum"],
-                                      decay=final_decay)
+        self.optimizer, self.scheduler = get_Optim(
+                                        self.model, 
+                                        self.ARCH["train"]["optimizer"],
+                                        self.ARCH["train"]["scheduler"], 
+                                        self.parser.get_train_size())
 
         if self.path is not None:
             torch.nn.Module.dump_patches = True
             w_dict = torch.load(path + "/SENet_valid_best",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-#             self.optimizer.load_state_dict(w_dict['optimizer'])
-#             self.epoch = w_dict['epoch'] + 1
-#             self.scheduler.load_state_dict(w_dict['scheduler'])
+            #             self.optimizer.load_state_dict(w_dict['optimizer'])
+            #             self.epoch = w_dict['epoch'] + 1
+            #             self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
-#             self.info = w_dict['info']
+            #             self.info = w_dict['info']
             print("info", w_dict['info'])
 
 
@@ -314,7 +289,6 @@ class Trainer():
                                                            evaluator=self.evaluator,
                                                            scheduler=self.scheduler,
                                                            color_fn=self.parser.to_color,
-                                                           report=self.ARCH["train"]["report_batch"],
                                                            show_scans=self.ARCH["train"]["show_scans"])
 
 
@@ -390,7 +364,7 @@ class Trainer():
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         return
 
-    def train_epoch(self, train_loader, model, criterion, optimizer, epoch, evaluator, scheduler, color_fn, report=10,
+    def train_epoch(self, train_loader, model, criterion, optimizer, epoch, evaluator, scheduler, color_fn,
                     show_scans=False):
         losses = AverageMeter()
         acc = AverageMeter()
@@ -409,7 +383,7 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _ = proj_data
+            in_vol, proj_mask, proj_labels = proj_data[0:3]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
@@ -419,10 +393,7 @@ class Trainer():
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    out = model(in_vol,rgb_data) #[output, z2, z4, z8]
-                else:
-                    out = model(in_vol)
+                out = model(in_vol,rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
                 if type(out) is not list: # IN CASE OF SINGLE OUTPUT
@@ -439,7 +410,7 @@ class Trainer():
 
                 loss_m = loss_mn + bdlosss
                 output = out[0]
-               
+
             optimizer.zero_grad()
             scaler.scale(loss_m.sum()).backward()
             scaler.step(optimizer)
@@ -452,10 +423,7 @@ class Trainer():
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
-                if self.ARCH["train"]["overfit"]:
-                    jaccard, class_jaccard = evaluator.getIoUMissingClass()
-                else:
-                    jaccard, class_jaccard = evaluator.getIoU()
+                jaccard, class_jaccard = evaluator.getIoUMissingClass()
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -487,7 +455,7 @@ class Trainer():
                     cv2.imwrite(name, out)
 
 
-            if i % self.ARCH["train"]["report_batch"] == 0:
+            if i % 10 == 0:
                 print('Lr: {lr:.3e} | '
                       'Epoch: [{0}][{1}/{2}] | '
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f}) | '
@@ -535,7 +503,7 @@ class Trainer():
         with torch.no_grad():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
-                in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _ = proj_data
+                in_vol, proj_mask, proj_labels = proj_data[0:3]
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
@@ -543,14 +511,10 @@ class Trainer():
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
-                if 'fusion' in self.ARCH["train"]["pipeline"]:
-                    output = model(in_vol,rgb_data)
-                else:
-                    output = model(in_vol)
-
+                output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
-            
+
                 log_out = torch.log(output.clamp(min=1e-8))
                 jacc = self.ls(output, proj_labels)
                 wce = criterion(log_out, proj_labels)

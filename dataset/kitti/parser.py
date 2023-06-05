@@ -218,19 +218,7 @@ class SemanticKitti(Dataset):
       scan.sem_label = self.map(scan.sem_label, self.learning_map)
       scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
 
-    # make a tensor of the uncompressed data (with the max num points)
     unproj_n_points = scan.points.shape[0]
-    unproj_xyz = torch.full((self.max_points, 3), -1.0, dtype=torch.float)
-    unproj_xyz[:unproj_n_points] = torch.from_numpy(scan.points)
-    unproj_range = torch.full([self.max_points], -1.0, dtype=torch.float)
-    unproj_range[:unproj_n_points] = torch.from_numpy(scan.unproj_range)
-    unproj_remissions = torch.full([self.max_points], -1.0, dtype=torch.float)
-    unproj_remissions[:unproj_n_points] = torch.from_numpy(scan.remissions)
-    if self.gt:
-      unproj_labels = torch.full([self.max_points], -1.0, dtype=torch.int32)
-      unproj_labels[:unproj_n_points] = torch.from_numpy(scan.sem_label)
-    else:
-      unproj_labels = []
 
     # get points and labels
     proj_range = torch.from_numpy(scan.proj_range).clone()
@@ -272,17 +260,12 @@ class SemanticKitti(Dataset):
     projected_data = [proj, 
                       proj_mask, 
                       proj_labels, 
-                      unproj_labels, 
                       path_seq, 
                       path_name, 
                       proj_x, proj_y, 
-                      proj_range, 
-                      unproj_range, 
+                      proj_range,  
                       proj_xyz, 
-                      unproj_xyz, 
-                      proj_remission, 
-                      unproj_remissions, 
-                      unproj_n_points]
+                      proj_remission]
     # return
     return projected_data, rgb_data
 
@@ -333,8 +316,7 @@ class Parser():
                workers,           # threads to load data
                gt=True,           # get gt?
                shuffle_train=True,
-               overfit = False,
-               share_subset_train=1.0):  # shuffle training set?
+               subset_ratio=1.0):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -386,13 +368,8 @@ class Parser():
     g = torch.Generator()
     g.manual_seed(1024)
 
-    if overfit:
-      self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, 6))
-      self.valid_dataset = torch.utils.data.Subset(self.valid_dataset, np.arange(0, 6))
-
-    if share_subset_train < 1:
-      assert overfit == False, "Overfit has to be turned off for training on subset."
-      samples_step = np.rint(1 / share_subset_train).astype('int')
+    if subset_ratio < 1:
+      samples_step = np.rint(1 / subset_ratio).astype('int')
       self.train_dataset = torch.utils.data.Subset(self.train_dataset, np.arange(0, len(self.train_dataset), samples_step))
 
     self.trainloader = torch.utils.data.DataLoader(self.train_dataset,
