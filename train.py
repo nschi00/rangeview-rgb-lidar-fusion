@@ -6,11 +6,11 @@ import shutil
 from shutil import copyfile
 import yaml
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from modules.trainer import Trainer
 
 
 if __name__ == '__main__':
-
     def seed_torch(seed=1024):
         import random
         import torch

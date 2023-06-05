@@ -45,17 +45,17 @@ class RangeFormer(nn.Module):
                                             BasicConv2d(128, 128, kernel_size=3, padding=1))
         self.model = MixVisionTransformer(img_size=img_size, patch_size=3, in_chans=128)
         self.end_mlp = nn.Sequential(BasicConv2d(128*4, 128, kernel_size=3, padding=1),
-                                     BasicConv2d(128, 20, kernel_size=3, padding=1))
+                                     BasicConv2d(128, n_classes, kernel_size=3, padding=1))
         self.unify_mlp = nn.ModuleList([BasicConv2d(64, 128, kernel_size=3, padding=1),
                                         BasicConv2d(128, 128, kernel_size=3, padding=1),
                                         BasicConv2d(256, 128, kernel_size=3, padding=1),
                                         BasicConv2d(512, 128, kernel_size=3, padding=1)])
-        self.aux_mlp = nn.ModuleList([BasicConv2d(128, 20, kernel_size=1),
-                                      BasicConv2d(128, 20, kernel_size=1),
-                                      BasicConv2d(128, 20, kernel_size=1),
-                                      BasicConv2d(128, 20, kernel_size=1)])
+        self.aux_mlp = nn.ModuleList([BasicConv2d(128, n_classes, kernel_size=1),
+                                      BasicConv2d(128, n_classes, kernel_size=1),
+                                      BasicConv2d(128, n_classes, kernel_size=1),
+                                      BasicConv2d(128, n_classes, kernel_size=1)])
 
-    def forward(self, lidar):
+    def forward(self, lidar, _):
         B, _, H, W = lidar.shape
         lidar_feats = self.initial_conv(lidar)
         lidar_atts = self.model(lidar_feats)
@@ -86,73 +86,8 @@ class RangeFormer(nn.Module):
             if m.bias is not None:
                 m.bias.data.zero_()
 
-class Cross_Attention(nn.Module):
-    def __init__(self,
-                 in_channels = [256, 512, 1024],
-                 hidden_dim=256,
-                 n_head=8) -> None:
-        super().__init__()
-        self.quere_pe = PositionalEncoding1D(hidden_dim)
-        self.num_feature_levels = 3
 
-        self.input_proj = nn.ModuleList()
-        self.decoder = nn.ModuleList()
-        for in_channel in in_channels:
-            if in_channel != hidden_dim:
-                self.input_proj.append(nn.Conv2d(in_channel, hidden_dim, kernel_size=1))
-                weight_init.c2_xavier_fill(self.input_proj[-1])
-            else:
-                self.input_proj.append(nn.Sequential())
-            self.decoder.append(nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=n_head, batch_first=True))
-        self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
 
-    def forward(self, A, B): # A: query, B: key, value
-        for i in range(len(self.input_proj)):
-            B_in = B["feat" + str(i + 1)]
-            B_in = self.input_proj[i](B_in)
-            B_in = B_in.view(B_in.shape[0], -1, B_in.shape[1]) + self.level_embed.weight[i][None, None, :]
-            A = A + self.quere_pe(A)
-            A = self.decoder[i](A, B_in, B_in)[0]
-        return A
-
-class Self_Attention(nn.Module):
-    def __init__(self,
-                 hidden_dim=256,
-                 n_head=8,
-                 depth=1) -> None:
-        super().__init__()
-        self.quere_pe = PositionalEncoding1D(hidden_dim)
-        self.decoder = nn.ModuleList()
-        for _ in range(depth):
-            self.decoder.append(nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=n_head, batch_first=True))
-
-    def forward(self, A): # A: query, B: key, value
-        for layer in self.decoder:
-            A = A + self.quere_pe(A)
-            A = layer(A, A, A)[0]
-        return A
-
-class Attention_Fusion(nn.Module):
-    def __init__(self,
-                 hidden_dim=256,
-                 in_channels = [256, 512, 1024],
-                 n_head=8,
-                 depth=3) -> None:
-        super().__init__()
-        fusion_block = nn.ModuleList([Cross_Attention(hidden_dim=hidden_dim,
-                                                      n_head=n_head,
-                                                      in_channels=in_channels),
-                                      Self_Attention(hidden_dim=hidden_dim, n_head=n_head)])
-        self.fusion_blocks = nn.ModuleList([deepcopy(fusion_block) for _ in range(depth)])
-
-    def forward(self, A, B): # A: query, B: key, value
-        A = A.view(A.shape[0], -1, A.shape[1])
-        out = []
-        for blk in self.fusion_blocks:
-            A = blk[0](A, B) # * fusion attention
-            A = blk[1](A)    # * self attention
-            out.append(A)
-        return out
 
 if __name__ == "__main__":
     model = RangeFormer(20, img_size=(64, 512))

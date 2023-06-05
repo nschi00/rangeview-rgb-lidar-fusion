@@ -2,7 +2,7 @@
 # training parameters
 ################################################################################
 train:
-  pipeline: "res"       #  "res"
+  pipeline: "rangeformer"       #  "res" "rangeformer"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
   aux_loss: True

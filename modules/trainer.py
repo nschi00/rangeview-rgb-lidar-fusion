@@ -17,6 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from modules.network.ResNet import ResNet_34
+from modules.network.RangeFormer import RangeFormer
 from tqdm import tqdm
 
 def get_Optim(model, config, iter_per_epoch = None):
@@ -137,6 +138,8 @@ class Trainer():
             if self.ARCH["train"]["pipeline"] == "res":
                 self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
                 convert_relu_to_softplus(self.model, activation)
+            elif self.ARCH["train"]["pipeline"] == "rangeformer":
+                self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)

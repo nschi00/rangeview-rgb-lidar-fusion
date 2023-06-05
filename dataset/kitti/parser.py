@@ -461,3 +461,12 @@ class Parser():
     label = SemanticKitti.map(label, self.learning_map_inv)
     # put label in color
     return SemanticKitti.map(label, self.color_map)
+  
+  def get_resolution(self):
+    try:
+      H = self.train_dataset.sensor_img_H
+      W = self.train_dataset.sensor_img_W
+    except:
+      H = self.train_dataset.dataset.sensor_img_H
+      W = self.train_dataset.dataset.sensor_img_W
+    return H, W
