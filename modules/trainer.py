@@ -15,10 +15,13 @@ from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from modules.network.ResNet import ResNet_34
 from tqdm import tqdm
 
-def get_Optim(model, optimizer_cfg, scheduler_cfg = None, iter_per_epoch = None):
+def get_Optim(model, config, iter_per_epoch = None):
+    optimizer_cfg = config["optimizer"]
+    scheduler_cfg = config["scheduler"]
     optim_name = optimizer_cfg["Name"]
     optimizer = eval("optim." + optim_name)
     try:
@@ -27,7 +30,7 @@ def get_Optim(model, optimizer_cfg, scheduler_cfg = None, iter_per_epoch = None)
         fusion_params = []
     rest_params = [p for n, p in model.named_parameters() if "fusion_layer" not in n]
 
-    total_iter = iter_per_epoch * optimizer_cfg["max_epochs"]
+    total_iter = iter_per_epoch * config["train"]["max_epochs"]
     # * F&B_mutiplier set to 1.0 will train all parameters with the same learning rate
     optimizer = optimizer(model.parameters(), **optimizer_cfg[optim_name])
 
@@ -138,16 +141,9 @@ class Trainer():
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Number of parameters: ", pytorch_total_params/1000000, "M")
-        print("Overfitting samples: ", self.ARCH["train"]["overfit"])
-        print("{}_{}_{}_{}". format(self.ARCH["fusion"]["name_backbone"],
-                                    "ca" if self.ARCH["fusion"]["use_att"] else "conv",
-                                    self.ARCH["fusion"]["fuse_all"],
-                                    "" if self.ARCH["train"]["aux_loss"] else "noaux"))
-        if self.ARCH["fusion"]["name_backbone"] == "mask2former":
-            print("{}_{}".format(self.ARCH["fusion"]["branch_type"], self.ARCH["fusion"]["stage"]))
-
-        print("Please verify your settings before continue.")
-        time.sleep(7)
+        print("Number of workers: ", self.ARCH["train"]["workers"])
+        print("Batch size: ", self.ARCH["train"]["batch_size"])
+        print("Subset ratio: ", self.ARCH["train"]["subset_ratio"])
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
@@ -184,8 +180,7 @@ class Trainer():
 
         self.optimizer, self.scheduler = get_Optim(
                                         self.model, 
-                                        self.ARCH["train"]["optimizer"],
-                                        self.ARCH["train"]["scheduler"], 
+                                        self.ARCH, 
                                         self.parser.get_train_size())
 
         if self.path is not None:
