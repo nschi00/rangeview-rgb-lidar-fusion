@@ -7,5 +7,7 @@ __pycache__/
 *.pth
 *.pt
 !logs/overfit_base
+!logs/baseline_25
+!logs/test_baseline_25
 .vscode/launch.json
 third_party/*
