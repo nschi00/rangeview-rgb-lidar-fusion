@@ -27,7 +27,7 @@ class BasicConv2d(nn.Module):
                               padding=padding, dilation=dilation, bias=False)
         self.bn = nn.BatchNorm2d(out_planes)
         if self.relu:
-            self.relu = nn.GELU()
+            self.relu = nn.LeakyReLU()
 
     def forward(self, x):
         if type(x) == tuple or type(x) == list:
