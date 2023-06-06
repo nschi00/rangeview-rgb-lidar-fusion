@@ -10,13 +10,9 @@ sys.path.append(os.path.join(os.getcwd(), 'modules'))
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 from overfit_test import overfit_test
 from mix_transformer import MixVisionTransformer, Mlp
-from torchvision.models import resnet50
-from torchvision.models._utils import IntermediateLayerGetter
-from torch.nn import functional as F
-from positional_encodings.torch_encodings import PositionalEncoding1D
 from timm.models.layers import trunc_normal_
-from copy import deepcopy
-from segformer_head import SegFormerHead
+
+from segformer_head import SegFormerHead, MLP
 
 class BasicConv2d(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, relu=True):
@@ -41,9 +37,15 @@ class BasicConv2d(nn.Module):
 class RangeFormer(nn.Module):
     def __init__(self, n_classes, img_size: tuple, embed_dims=[128, 128, 256, 512]) -> None:
         super().__init__()
-        self.initial_conv = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
-                                            BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                            BasicConv2d(128, 128, kernel_size=3, padding=1))
+        self.rem = nn.Sequential(MLP(6, 64, True),
+                                 nn.BatchNorm2d(64),
+                                 MLP(64, 128, True),
+                                 nn.BatchNorm2d(128),
+                                 MLP(128, 128, True),
+                                 nn.BatchNorm2d(128))
+        # self.rem = nn.Sequential(BasicConv2d(6, 64, kernel_size=3, padding=1),
+        #                         BasicConv2d(64, 128, kernel_size=3, padding=1),
+        #                         BasicConv2d(128, 128, kernel_size=3, padding=1))
         self.model = MixVisionTransformer(img_size=img_size, 
                                           patch_size=3, 
                                           in_chans=128,
@@ -66,7 +68,8 @@ class RangeFormer(nn.Module):
 
     def forward(self, lidar, _):
         B, _, H, W = lidar.shape
-        lidar_feats = self.initial_conv(lidar)
+        #lidar_feats = self.initial_conv(lidar)
+        lidar_feats = self.rem(lidar)
         lidar_atts = self.model(lidar_feats)
         out = self.decoder(lidar_atts)
         # for i, att in enumerate(lidar_atts):
@@ -101,5 +104,5 @@ class RangeFormer(nn.Module):
 
 if __name__ == "__main__":
     model = RangeFormer(20, img_size=(64, 512))
-    overfit_test(model, 6, None, (5, 64, 512))
+    overfit_test(model, 6, None, (6, 64, 512))
     pass

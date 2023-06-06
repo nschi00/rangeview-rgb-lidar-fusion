@@ -15,13 +15,19 @@ class MLP(nn.Module):
     """
     Linear Embedding
     """
-    def __init__(self, input_dim=2048, embed_dim=768):
+    def __init__(self, input_dim=2048, embed_dim=768, reshape=False):
         super().__init__()
         self.proj = nn.Linear(input_dim, embed_dim)
+        self.act = nn.GELU()
+        self.reshape = reshape
 
     def forward(self, x):
+        b, c, h, w = x.shape
         x = x.flatten(2).transpose(1, 2)
         x = self.proj(x)
+        x = self.act(x)
+        if self.reshape:
+            x = x.transpose(1, 2).view(b, -1, h, w)
         return x
 
 

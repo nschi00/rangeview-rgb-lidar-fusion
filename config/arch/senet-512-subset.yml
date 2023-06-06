@@ -23,13 +23,12 @@ train:
 # optimizer parameters
 ################################################################################
 optimizer:
-  Name: SGD # AdamW, SGD
+  Name: AdamW # AdamW, SGD
   F&B_mutiplier: 1.0 # Whether to use reduce the learning rate for the backbone and fusion module
   AdamW:
-    lr: 0.01
+    lr: 0.001
     weight_decay: 0.0001
     betas: [0.9, 0.999]
-    eps: 1e-08
     amsgrad: False
   SGD:
     lr: 0.01
@@ -38,7 +37,7 @@ optimizer:
     dampening: 0
     nesterov: False
 scheduler:
-  Name: CosineAnnealingWarmupRestarts # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
+  Name: OneCycleLR # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
   CosineAnnealingWarmupRestarts:
     first_cycle_steps : 50
     warmup_steps : 1
@@ -49,7 +48,7 @@ scheduler:
   OneCycleLR: # Old decay with warmup and cosine annealing 
     max_lr: 0.01 # Equal to optimizer.lr
     total_steps: 1000 # Equal to max_epochs * iterations_per_epoch
-    pct_start: 0.01 # The percentage of the cycle (in number of steps) spent increasing the learning rate (warmup).
+    pct_start: 0.02 # The percentage of the cycle (in number of steps) spent increasing the learning rate (warmup).
   ReduceLROnPlateau: # NOT TUNED
     mode: 'min'
     factor: 0.1

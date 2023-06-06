@@ -16,6 +16,8 @@ from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
+from torch.optim.lr_scheduler import OneCycleLR
+from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
 from tqdm import tqdm
@@ -117,6 +119,7 @@ class Trainer():
                                           shuffle_train=True,
                                           subset_ratio=self.ARCH["train"]["subset_ratio"])
 
+        self.range_preprocess = RangePreprocess()
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -391,7 +394,12 @@ class Trainer():
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                out = model(in_vol,rgb_data)
+                if self.ARCH["train"]["pipeline"] == "rangeformer":
+                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
+                                                                          proj_mask.cuda(), 
+                                                                          proj_labels,
+                                                                          False)
+                out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
                 if type(out) is not list: # IN CASE OF SINGLE OUTPUT
@@ -509,6 +517,8 @@ class Trainer():
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
+                if self.ARCH["train"]["pipeline"] == "rangeformer":
+                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, proj_mask, proj_labels)
                 output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
