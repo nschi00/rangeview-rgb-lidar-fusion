@@ -33,7 +33,7 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64):
+                 norm_layer=None, groups=1, width_per_group=64, use_skip=True):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
@@ -44,6 +44,7 @@ class Fusion(nn.Module):
         self.if_BN = if_BN
         self.dilation = 1
         self.aux = aux
+        self.use_skip = use_skip
 
         self.groups = groups
         self.base_width = width_per_group
@@ -68,9 +69,6 @@ class Fusion(nn.Module):
         for i, j in enumerate([1, 2, 2, 2]):
             self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
 
-
-        self.semantic_output = nn.Conv2d(128, nclasses, 1)
-
         if self.aux:
             self.aux_heads = nn.ModuleDict()
             for i in range(1, 4):
@@ -80,11 +78,19 @@ class Fusion(nn.Module):
         self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
         self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
 
-        self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=1000,
-                                      embed_dims=embed_dims, num_heads=[1, 2, 4, 8],
-                                      mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
-                                      attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                                      depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1])
+        if not self.use_skip:
+            self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=nclasses,
+                                        embed_dims=embed_dims, num_heads=[1, 2, 4, 8],
+                                        mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
+                                        attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                                        depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1])
+        else:
+            self.end_conv = BasicConv2d(256, nclasses, kernel_size=1)
+            self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=128,
+                                        embed_dims=embed_dims, num_heads=[1, 2, 4, 8],
+                                        mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
+                                        attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                                        depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1])
         
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -142,6 +148,8 @@ class Fusion(nn.Module):
         x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
         x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
         out, aux_outputs = self.fusion_layer(x_lidar_features, x_rgb_features)
+        if self.use_skip:
+            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
 
         out = F.softmax(out, dim=1)
 
@@ -191,7 +199,6 @@ class SegFusion(nn.Module):
                  attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm,
                  depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1]):
         super().__init__()
-        self.num_classes = num_classes
         self.depths = depths
         in_channels_head = (torch.Tensor(embed_dims)*2).int().tolist()
         def divide(tuple_data, divisor):
@@ -334,7 +341,7 @@ class SegFusion(nn.Module):
             sr_ratio=sr_ratios[3])
         self.norm_rgb4 = norm_layer(embed_dims[3])
 
-        self.head = SegFormerHead(embedding_dim=256, in_channels_head=in_channels_head, img_size=img_size)
+        self.head = SegFormerHead(embedding_dim=256, in_channels_head=in_channels_head, num_classes=num_classes, img_size=img_size)
 
         self.apply(self._init_weights)
 
@@ -542,5 +549,5 @@ class CrossAttentionBlock(nn.Module):
         return x
 
 if __name__ == "__main__":
-    model = Fusion(20, True).cuda()
+    model = Fusion(20, True, use_skip=False).cuda()
     overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
