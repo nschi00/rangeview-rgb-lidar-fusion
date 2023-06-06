@@ -16,6 +16,7 @@ from torch.nn import functional as F
 from positional_encodings.torch_encodings import PositionalEncoding1D
 from timm.models.layers import trunc_normal_
 from copy import deepcopy
+from segformer_head import SegFormerHead
 
 class BasicConv2d(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, relu=True):
@@ -38,36 +39,45 @@ class BasicConv2d(nn.Module):
         return x
 
 class RangeFormer(nn.Module):
-    def __init__(self, n_classes, img_size: tuple) -> None:
+    def __init__(self, n_classes, img_size: tuple, embed_dims=[128, 128, 256, 512]) -> None:
         super().__init__()
         self.initial_conv = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
                                             BasicConv2d(64, 128, kernel_size=3, padding=1),
                                             BasicConv2d(128, 128, kernel_size=3, padding=1))
-        self.model = MixVisionTransformer(img_size=img_size, patch_size=3, in_chans=128)
-        self.end_mlp = nn.Sequential(BasicConv2d(128*4, 128, kernel_size=3, padding=1),
-                                     BasicConv2d(128, n_classes, kernel_size=3, padding=1))
-        self.unify_mlp = nn.ModuleList([BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                        BasicConv2d(128, 128, kernel_size=3, padding=1),
-                                        BasicConv2d(256, 128, kernel_size=3, padding=1),
-                                        BasicConv2d(512, 128, kernel_size=3, padding=1)])
-        self.aux_mlp = nn.ModuleList([BasicConv2d(128, n_classes, kernel_size=1),
-                                      BasicConv2d(128, n_classes, kernel_size=1),
-                                      BasicConv2d(128, n_classes, kernel_size=1),
-                                      BasicConv2d(128, n_classes, kernel_size=1)])
+        self.model = MixVisionTransformer(img_size=img_size, 
+                                          patch_size=3, 
+                                          in_chans=128,
+                                          embed_dims=embed_dims,
+                                          sr_ratios=[16, 8, 2, 1])
+        self.decoder = SegFormerHead(embedding_dim=128,
+                                     in_channels_head=embed_dims,
+                                     num_classes=n_classes,
+                                     img_size=img_size)
+        # self.end_mlp = nn.Sequential(BasicConv2d(128*4, 128, kernel_size=3, padding=1),
+        #                              BasicConv2d(128, n_classes, kernel_size=3, padding=1))
+        # self.unify_mlp = nn.ModuleList([BasicConv2d(embed_dims[0], 128, kernel_size=3, padding=1),
+        #                                 BasicConv2d(embed_dims[1], 128, kernel_size=3, padding=1),
+        #                                 BasicConv2d(embed_dims[2], 128, kernel_size=3, padding=1),
+        #                                 BasicConv2d(embed_dims[3], 128, kernel_size=3, padding=1)])
+        # self.aux_mlp = nn.ModuleList([BasicConv2d(128, n_classes, kernel_size=1),
+        #                               BasicConv2d(128, n_classes, kernel_size=1),
+        #                               BasicConv2d(128, n_classes, kernel_size=1),
+        #                               BasicConv2d(128, n_classes, kernel_size=1)])
 
     def forward(self, lidar, _):
         B, _, H, W = lidar.shape
         lidar_feats = self.initial_conv(lidar)
         lidar_atts = self.model(lidar_feats)
-        for i, att in enumerate(lidar_atts):
-            lidar_atts[i] = F.interpolate(self.unify_mlp[i](att), (H,W), mode='bilinear', align_corners=True)
+        out = self.decoder(lidar_atts)
+        # for i, att in enumerate(lidar_atts):
+        #     lidar_atts[i] = F.interpolate(self.unify_mlp[i](att), (H,W), mode='bilinear', align_corners=True)
 
-        out = []
-        final_pred = F.softmax(self.end_mlp(torch.cat(lidar_atts, dim=1)), dim=1)
-        out.append(final_pred)
-        for i, att in enumerate(lidar_atts):
-            aux_out = self.aux_mlp[i](att)
-            out.append(F.softmax(aux_out, dim = 1))
+        # out = []
+        # final_pred = F.softmax(self.end_mlp(torch.cat(lidar_atts, dim=1)), dim=1)
+        # out.append(final_pred)
+        # for i, att in enumerate(lidar_atts):
+        #     aux_out = self.aux_mlp[i](att)
+        #     out.append(F.softmax(aux_out, dim = 1))
 
         return out
 

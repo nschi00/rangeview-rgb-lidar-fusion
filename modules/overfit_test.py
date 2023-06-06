@@ -30,7 +30,8 @@ def overfit_test(model, batchsize, rgb_sze=None, lidar_sze=None):
         #with torch.no_grad():
         start_time = time.time()
         if rgb_sze == None:
-            out = model(input_3D)
+            input_rgb = torch.rand(batchsize, c2, h2, w2).cuda() 
+            out = model(input_3D, input_rgb)
         else:
             out = model(input_3D, input_rgb)
         if type(out) != list:
