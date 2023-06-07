@@ -37,15 +37,13 @@ class BasicConv2d(nn.Module):
 class RangeFormer(nn.Module):
     def __init__(self, n_classes, img_size: tuple, embed_dims=[128, 128, 256, 512]) -> None:
         super().__init__()
-        self.rem = nn.Sequential(MLP(6, 64, True),
-                                 nn.BatchNorm2d(64),
-                                 MLP(64, 128, True),
-                                 nn.BatchNorm2d(128),
-                                 MLP(128, 128, True),
-                                 nn.BatchNorm2d(128))
-        # self.rem = nn.Sequential(BasicConv2d(6, 64, kernel_size=3, padding=1),
-        #                         BasicConv2d(64, 128, kernel_size=3, padding=1),
-        #                         BasicConv2d(128, 128, kernel_size=3, padding=1))
+        # self.rem = nn.Sequential(MLP(6, 64, True),
+        #                          MLP(64, 128, True),
+        #                          MLP(128, 128, True),
+        #                          nn.BatchNorm2d(128))
+        self.rem = nn.Sequential(BasicConv2d(6, 64, kernel_size=3, padding=1),
+                                BasicConv2d(64, 128, kernel_size=3, padding=1),
+                                BasicConv2d(128, 128, kernel_size=3, padding=1))
         self.model = MixVisionTransformer(img_size=img_size, 
                                           patch_size=3, 
                                           in_chans=128,

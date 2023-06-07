@@ -86,6 +86,20 @@ class SemanticKitti(Dataset):
     self.gt = gt
     self.transform = transform
     self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    if self.transform:
+      # self.aug_prob = {"scaling": 0.0,
+      #             "rotation": 0.5,
+      #             "jittering": 0.5,
+      #             "flipping": 0.5,
+      #             "point_dropping": 0.5}
+      self.aug_prob = {"scaling": 1.0,
+                       "rotation": 1.0,
+                       "jittering": 1.0,
+                       "flipping": 1.0,
+                       "point_dropping": 0.9}
+      print(self.aug_prob)
+    else:
+      self.aug_prob = defaultdict(int)
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -163,19 +177,6 @@ class SemanticKitti(Dataset):
       label_file = self.label_files[index]
 
     # open a semantic laserscan
-    if self.transform:
-      # aug_prob = {"scaling": 0.0,
-      #             "rotation": 0.5,
-      #             "jittering": 0.5,
-      #             "flipping": 0.5,
-      #             "point_dropping": 0.5}
-      aug_prob = {"scaling": 1.0,
-                  "rotation": 1.0,
-                  "jittering": 1.0,
-                  "flipping": 1.0,
-                  "point_dropping": 0.9}
-    else:
-      aug_prob = defaultdict(int)
     if self.gt:
       scan = SemLaserScan(self.color_map,
                           project=True,
@@ -183,14 +184,14 @@ class SemanticKitti(Dataset):
                           W=self.sensor_img_W,
                           fov_up=self.sensor_fov_up,
                           fov_down=self.sensor_fov_down,
-                          aug_prob=aug_prob)
+                          aug_prob=self.aug_prob)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
                        W=self.sensor_img_W,
                        fov_up=self.sensor_fov_up,
                        fov_down=self.sensor_fov_down,
-                       aug_prob=aug_prob)
+                       aug_prob=self.aug_prob)
 
     # open and obtain scan
     scan.open_scan(scan_file)
