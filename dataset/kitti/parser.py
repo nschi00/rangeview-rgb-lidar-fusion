@@ -108,10 +108,10 @@ class SemanticKitti(Dataset):
     self.only_lidar_front = only_lidar_front
     self.transform = transform
 
-    if rgb_resize:
+    if rgb_resize == True:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
-      self.img_transform = TF.Compose([TF.ToTensor()])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
