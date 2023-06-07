@@ -12,17 +12,13 @@ class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
     EXTENSIONS_SCAN = ['.bin']
 
-    def __init__(self, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0,DA=False,flip_sign=False,rot=False,drop_points=False):
+    def __init__(self, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0, aug_prob=None):
         self.project = project
         self.proj_H = H
         self.proj_W = W
         self.proj_fov_up = fov_up
         self.proj_fov_down = fov_down
-        self.DA = DA
-        self.flip_sign = flip_sign
-        self.rot = rot
-        self.drop_points = drop_points
-
+        self.aug_prob = aug_prob
         self.reset()
 
     def reset(self):
@@ -87,10 +83,16 @@ class LaserScan:
         # put in attribute
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
-        if self.drop_points is not False:
+        if random.random() < self.aug_prob["point_dropping"]:
+            if self.aug_prob["scaling"] == 0.0:
+                self.drop_points = random.uniform(0.0, 0.5)
+            else:
+                self.drop_points = 0.1
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
             points = np.delete(points,self.points_to_drop,axis=0)
             remissions = np.delete(remissions,self.points_to_drop)
+        else:
+            self.drop_points = False
 
         self.set_points(points, remissions)
 
@@ -110,21 +112,14 @@ class LaserScan:
 
         # put in attribute
         self.points = points  # get
-        if self.flip_sign:
+        if random.random() < self.aug_prob["flipping"]:
             self.points[:, 1] = -self.points[:, 1]
-        if self.DA:
-            jitter_x = random.uniform(-5, 5)
-            jitter_y = random.uniform(-3, 3)
-            jitter_z = random.uniform(-1, 0)
-            self.points[:, 0] += jitter_x
-            self.points[:, 1] += jitter_y
-            self.points[:, 2] += jitter_z
-        if self.rot:
-            euler_angle = np.random.normal(0, 90, 1)[0]  # 40
-            r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
-            r_t = r.transpose()
-            self.points = self.points.dot(r_t)
-            self.points = np.squeeze(self.points)
+        if random.random() < self.aug_prob["jittering"]:
+            self.RandomJittering()
+        if random.random() < self.aug_prob["rotation"]:
+            self.GlobalRotation()
+        if random.random() < self.aug_prob["scaling"]:
+            self.RandomScaling()
         if remissions is not None:
             self.remissions = remissions  # get remission
             #if self.DA:
@@ -136,39 +131,27 @@ class LaserScan:
         if self.project:
             self.do_range_projection()
 
-
-#         fov_up = 3.0
-#         fov_down = -25.0
-#         self.fov_up = fov_up
-#         self.fov_down = fov_down
-#         fov_up = fov_up / 180.0 * np.pi  # field of view up in rad
-#         fov_down = fov_down / 180.0 * np.pi  # field of view down in rad
-#         fov = abs(fov_down) + abs(fov_up)
-#         zero_matrix = np.zeros((self.proj_H, self.proj_W))
-#         one_matrix = np.ones((self.proj_H, self.proj_W))
-
-#         self.theta_channel = np.zeros((self.proj_H, self.proj_W))
-#         self.phi_channel = np.zeros((self.proj_H, self.proj_W))
-#         for i in range(self.proj_H):
-#             for j in range(self.proj_W):
-#                 self.theta_channel[i, j] = np.pi * (float(j + 0.5) / self.proj_W * 2 - 1)
-#                 self.phi_channel[i, j] = (1 - float(i + 0.5) / self.proj_H) * fov - abs(fov_down)
-#         self.R_theta = [np.cos(self.theta_channel), -np.sin(self.theta_channel), zero_matrix,
-#                         np.sin(self.theta_channel), np.cos(self.theta_channel), zero_matrix, zero_matrix,
-#                         zero_matrix, one_matrix]
-#         self.R_theta = np.asarray(self.R_theta)
-#         self.R_theta = np.transpose(self.R_theta, (1, 2, 0))
-#         self.R_theta = np.reshape(self.R_theta, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_phi = [np.cos(self.phi_channel), zero_matrix, -np.sin(self.phi_channel), zero_matrix, one_matrix,
-#                       zero_matrix, np.sin(self.phi_channel), zero_matrix, np.cos(self.phi_channel)]
-#         self.R_phi = np.asarray(self.R_phi)
-#         self.R_phi = np.transpose(self.R_phi, (1, 2, 0))
-#         self.R_phi = np.reshape(self.R_phi, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_theta_phi = np.matmul(self.R_theta, self.R_phi)
-
-#         normal_image = self.calculate_normal(self.fill_spherical(self.proj_range))
-#         self.normal_image = normal_image * np.transpose([self.proj_mask, self.proj_mask, self.proj_mask],
-#                                                    [1, 2, 0])
+    def RandomScaling(self, r_s=0.05):
+        scale = np.random.uniform(1, 1+r_s)
+        if np.random.random() < 0.5:
+            scale = 1 / scale
+            self.points[:, :2] *= scale
+    
+    def GlobalRotation(self):
+        euler_angle = np.random.normal(0, 90, 1)[0]  # 40
+        r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        r_t = r.transpose()
+        self.points = self.points.dot(r_t)
+        self.points = np.squeeze(self.points)
+    
+    def RandomJittering(self):
+        jitter_x = random.uniform(-3, 3)
+        jitter_y = random.uniform(-3, 3)
+        jitter_z = random.uniform(-1, 0)
+        self.points[:, 0] += jitter_x
+        self.points[:, 1] += jitter_y
+        self.points[:, 2] += jitter_z
+    
     def do_fd_projection(self):
       """ Project a pointcloud into a spherical projection image.projection.
           Function takes no arguments because it can be also called externally
@@ -334,8 +317,8 @@ class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
     EXTENSIONS_LABEL = ['.label']
 
-    def __init__(self, sem_color_dict=None, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0, max_classes=300,DA=False,flip_sign=False,rot=False,drop_points=False):
-        super(SemLaserScan, self).__init__(project, H, W, fov_up, fov_down,DA=DA,flip_sign=flip_sign,rot=rot,drop_points=drop_points)
+    def __init__(self, sem_color_dict=None, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0, max_classes=300, aug_prob=None):
+        super(SemLaserScan, self).__init__(project, H, W, fov_up, fov_down, aug_prob=aug_prob)
         self.reset()
 
         # make semantic colors

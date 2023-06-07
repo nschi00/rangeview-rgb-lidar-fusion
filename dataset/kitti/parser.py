@@ -4,22 +4,11 @@ import torch
 from torch.utils.data import Dataset
 from common.laserscan import LaserScan, SemLaserScan
 import torchvision.transforms as TF
-
+from collections import defaultdict
 import torch
-import math
 import random
 from PIL import Image
-try:
-    import accimage
-except ImportError:
-    accimage = None
 import numpy as np
-import numbers
-import types
-from collections.abc import Sequence, Iterable
-import warnings
-
-
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -174,20 +163,19 @@ class SemanticKitti(Dataset):
       label_file = self.label_files[index]
 
     # open a semantic laserscan
-    DA = False
-    flip_sign = False
-    rot = False
-    drop_points = False
     if self.transform:
-        if random.random() > 0.5:
-            if random.random() > 0.5:
-                DA = True
-            if random.random() > 0.5:
-                flip_sign = True
-            if random.random() > 0.5:
-                rot = True
-            drop_points = random.uniform(0, 0.5)
-
+      # aug_prob = {"scaling": 0.0,
+      #             "rotation": 0.5,
+      #             "jittering": 0.5,
+      #             "flipping": 0.5,
+      #             "point_dropping": 0.5}
+      aug_prob = {"scaling": 1.0,
+                  "rotation": 1.0,
+                  "jittering": 1.0,
+                  "flipping": 1.0,
+                  "point_dropping": 0.9}
+    else:
+      aug_prob = defaultdict(int)
     if self.gt:
       scan = SemLaserScan(self.color_map,
                           project=True,
@@ -195,20 +183,14 @@ class SemanticKitti(Dataset):
                           W=self.sensor_img_W,
                           fov_up=self.sensor_fov_up,
                           fov_down=self.sensor_fov_down,
-                          DA=DA,
-                          flip_sign=flip_sign,
-                          rot=rot,
-                          drop_points=drop_points)
+                          aug_prob=aug_prob)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
                        W=self.sensor_img_W,
                        fov_up=self.sensor_fov_up,
                        fov_down=self.sensor_fov_down,
-                       DA=DA,
-                       flip_sign=flip_sign,
-                       rot=rot,
-                       drop_points=drop_points)
+                       aug_prob=aug_prob)
 
     # open and obtain scan
     scan.open_scan(scan_file)
