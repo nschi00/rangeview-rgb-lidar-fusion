@@ -14,7 +14,7 @@ class RangePreprocess():
     def __call__(self, data, mask, label, training=False):
         data = torch.cat([data, mask.unsqueeze(1)], dim=1)
         if not training:
-            return data, mask, label
+            return data, mask, label.long()
         data_list = list(torch.unbind(data))
         bs = len(data_list)
         out_scan = []
@@ -40,7 +40,7 @@ class RangePreprocess():
         out_scan = torch.stack(out_scan)
         out_label = torch.stack(out_label)
         out_mask = out_scan[:, -1, :, :]
-        return out_scan, out_label, out_mask
+        return out_scan, out_mask, out_label.long()
     
     def RangeUnion(self, scan_a, label_a, scan_b, label_b, k_union=0.5):
         scan_a_, label_a_ = scan_a.clone(), label_a.clone()

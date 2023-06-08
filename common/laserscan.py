@@ -83,11 +83,11 @@ class LaserScan:
         # put in attribute
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
-        if random.random() < self.aug_prob["point_dropping"]:
+        if random.random() < self.aug_prob["point_dropping"][0]:
             if self.aug_prob["scaling"] == 0.0:
-                self.drop_points = random.uniform(0.0, 0.5)
+                self.drop_points = random.uniform(0.0, self.aug_prob["point_dropping"][1])
             else:
-                self.drop_points = 0.1
+                self.drop_points = self.aug_prob["point_dropping"][0]
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
             points = np.delete(points,self.points_to_drop,axis=0)
             remissions = np.delete(remissions,self.points_to_drop)
