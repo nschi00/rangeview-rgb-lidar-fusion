@@ -87,19 +87,20 @@ class SemanticKitti(Dataset):
     self.transform = transform
     self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     if self.transform:
-      # self.aug_prob = {"scaling": 0.0,
-      #             "rotation": 0.5,
-      #             "jittering": 0.5,
-      #             "flipping": 0.5,
-      #             "point_dropping": 0.5}
-      self.aug_prob = {"scaling": 1.0,
-                       "rotation": 1.0,
-                       "jittering": 1.0,
-                       "flipping": 1.0,
-                       "point_dropping": 0.9}
+      self.aug_prob = {"scaling": 0.0,
+                       "rotation": 0.5,
+                       "jittering": 0.5,
+                       "flipping": 0.5,
+                       "point_dropping": [0.5, 0.5]}
+      # self.aug_prob = {"scaling": 1.0,
+      #                  "rotation": 1.0,
+      #                  "jittering": 1.0,
+      #                  "flipping": 1.0,
+      #                  "point_dropping": [0.9, 0.1]}
       print(self.aug_prob)
     else:
       self.aug_prob = defaultdict(int)
+      self.aug_prob["point_dropping"] = [0.0, 0.0]
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many

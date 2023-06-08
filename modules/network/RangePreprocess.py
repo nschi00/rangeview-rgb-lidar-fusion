@@ -15,16 +15,15 @@ class RangePreprocess():
         data = torch.cat([data, mask.unsqueeze(1)], dim=1)
         if not training:
             return data, mask, label.long()
-        data_list = list(torch.unbind(data))
-        bs = len(data_list)
+        bs = data.shape[0]
         out_scan = []
         out_label = []
         for i in range(bs):
             j = random.randint(0, bs-1)
             while j == i:
                 j = random.randint(0, bs-1)
-            scan_a, scan_b = data_list[i], data_list[j]
-            label_a, label_b = label[i], label[j]
+            scan_a, scan_b = data[i].clone(), data[j]
+            label_a, label_b = label[i].clone(), label[j]
 
             if torch.rand(1) < self.aug_prob[0]:
                 scan_a, label_a = self.RangeMix(scan_a, label_a, scan_b, label_b)
@@ -43,44 +42,40 @@ class RangePreprocess():
         return out_scan, out_mask, out_label.long()
     
     def RangeUnion(self, scan_a, label_a, scan_b, label_b, k_union=0.5):
-        scan_a_, label_a_ = scan_a.clone(), label_a.clone()
         mask = scan_a[-1, :, :]
         void = mask == 0
         mask_temp = torch.rand(void.shape, device=void.device) <= k_union
     # * Only fill 50% of the void points
         void = void.logical_and(mask_temp)
-        scan_a_[:, void], label_a_[void] = scan_b[:, void], label_b[void]
-        return scan_a_, label_a_
+        scan_a[:, void], label_a[void] = scan_b[:, void], label_b[void]
+        return scan_a, label_a
 
     def RangePaste(self, scan_a, label_a, scan_b, label_b, tail_classes=None):
-        scan_a_, label_a_ = scan_a.clone(), label_a.clone()
         if tail_classes is None:
             tail_classes = [ 2,  3,  4,  5,  6,  7,  8, 16, 18, 19]
         for tail_class in tail_classes:
             pix = label_b == tail_class
-            scan_a_[:, pix] = scan_b[:, pix]
-            label_a_[pix] = label_b[pix]
-        return scan_a_, label_a_
+            scan_a[:, pix] = scan_b[:, pix]
+            label_a[pix] = label_b[pix]
+        return scan_a, label_a
     
     def RangeShift(self, scan_a, label_a):
-        scan_a_, label_a_ = scan_a.clone(), label_a.clone()
-        _, h, w = scan_a_.shape
+        _, h, w = scan_a.shape
         p = torch.randint(low=int(0.25*w), high=int(0.75*w), size=(1,))
-        scan_a_ = torch.cat([scan_a_[:, :, p:], scan_a_[:, :, :p]], dim=2)
-        label_a_ = torch.cat([label_a_[:, p:], label_a_[:, :p]], dim=1)
-        # scan_a_ = torch.cat(scan_a[:, p:, :], scan_a[:, :p, :], dim = 1)
-        # label_a_ = torch.cat(label_a[p:, :], label_a[:p, :], dim = 1)
-        return scan_a_, label_a_
+        scan_a = torch.cat([scan_a[:, :, p:], scan_a[:, :, :p]], dim=2)
+        label_a = torch.cat([label_a[:, p:], label_a[:, :p]], dim=1)
+        # scan_a = torch.cat(scan_a[:, p:, :], scan_a[:, :p, :], dim = 1)
+        # label_a = torch.cat(label_a[p:, :], label_a[:p, :], dim = 1)
+        return scan_a, label_a
     
     
     def RangeMix(self, scan_a, label_a, scan_b, label_b, mix_strategies= [2, 3, 4, 5, 6]):
-        scan_a_, label_a_ = scan_a.clone(), label_a.clone()
-        _, h, w = scan_a_.shape
+        _, h, w = scan_a.shape
         k_mix = random.choice(mix_strategies)
         index = random.choice(range(k_mix))
         mix_h_s = int(h / k_mix) * (index)
         mix_h_e = int(h / k_mix) * (index + 1)
-        scan_a_[:, mix_h_s:mix_h_e, :] = scan_b[:, mix_h_s:mix_h_e, :]
-        label_a_[mix_h_s:mix_h_e, :] = label_b[mix_h_s:mix_h_e, :]
-        return scan_a_, label_a_
+        scan_a[:, mix_h_s:mix_h_e, :] = scan_b[:, mix_h_s:mix_h_e, :]
+        label_a[mix_h_s:mix_h_e, :] = label_b[mix_h_s:mix_h_e, :]
+        return scan_a, label_a
         

@@ -390,15 +390,16 @@ class Trainer():
             if not self.multi_gpu and self.gpu:
                 in_vol = in_vol.cuda()
             if self.gpu:
-                proj_labels = proj_labels.cuda().long()
-            rgb_data = rgb_data.cuda()
+                proj_labels = proj_labels.cuda()
+                proj_mask = proj_mask.cuda()
+                rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask.cuda(), 
+                                                                          proj_mask, 
                                                                           proj_labels,
-                                                                          False)
+                                                                          True)
                 out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
@@ -408,11 +409,11 @@ class Trainer():
                 ## SUM POSITION LOSSES
                 for j in range(len(out)):
                     if j == 0:
-                        bdlosss = self.bd(out[j], proj_labels.long())
-                        loss_mn = criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                        bdlosss = self.bd(out[j], proj_labels)
+                        loss_mn = criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels)
                     else:
-                        bdlosss += lamda*self.bd(out[j], proj_labels.long())
-                        loss_mn += lamda*criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels.long())
+                        bdlosss += lamda*self.bd(out[j], proj_labels)
+                        loss_mn += lamda*criterion(torch.log(out[j].clamp(min=1e-8)), proj_labels) + 1.5 * self.ls(out[j], proj_labels)
 
                 loss_m = loss_mn + bdlosss
                 output = out[0]
