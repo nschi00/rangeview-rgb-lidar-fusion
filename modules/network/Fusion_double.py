@@ -2,6 +2,8 @@ import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
+sys.path.append("modules")
+from overfit_test import overfit_test
 
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
@@ -30,7 +32,7 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64):
+                 norm_layer=None, groups=1, width_per_group=64, use_skip=True):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
@@ -78,7 +80,7 @@ class Fusion(nn.Module):
         height = (64 // upscale // window_size + 1) * window_size
         width = (512 // upscale // window_size + 1) * window_size
         self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
-                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
+                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8, 8],
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
         
@@ -134,6 +136,7 @@ class Fusion(nn.Module):
         for i in range(2, 5):
             x_lidar_features[str(i)] = F.interpolate(
                 x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
+        for i in range(0, 5):
             x_rgb_features[str(i)] = F.interpolate(
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
@@ -246,8 +249,8 @@ class SwinFusion(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
-        num_patches = 32768  ###TODO: change to image size multiplication
-        # num_patches = 12288
+        # num_patches = 32768  ###TODO: change to image size multiplication
+        num_patches = 12288
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
@@ -439,29 +442,5 @@ class SwinFusion(nn.Module):
 
 
 if __name__ == "__main__":
-    import time
-    model = Fusion(20, use_att=False, fusion_scale="main_late").cuda()
-    print(model)
-
-    pytorch_total_params = sum(p.numel()
-                               for p in model.parameters() if p.requires_grad)
-    print("Number of parameters: ", pytorch_total_params / 1000000, "M")
-
-    # for module_name, module in model.named_parameters():
-    #     if "fusion" in module_name:
-    #         print(module_name, module)
-
-    time_train = []
-    for i in range(20):
-        input_3D = torch.rand(2, 5, 64, 512).cuda()
-        input_rgb = torch.rand(2, 3, 64, 512).cuda()
-        model.eval()
-        with torch.no_grad():
-            start_time = time.time()
-            outputs = model(input_3D, input_rgb)
-        torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
-        fwt = time.time() - start_time
-        time_train.append(fwt)
-        print("Forward time per img: %.3f (Mean: %.3f)" % (
-            fwt / 1, sum(time_train) / len(time_train) / 1))
-        time.sleep(0.15)
+    model = Fusion(20, True, use_skip=False).cuda()
+    overfit_test(model, 1, (3, 64, 192), (5, 64, 192))

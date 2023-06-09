@@ -33,166 +33,49 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_skip=False):
+                 norm_layer=None, groups=1, width_per_group=64):
 
         super(Fusion, self).__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
 
-        """BASEMODEL"""
-        self._norm_layer = norm_layer
-        self.if_BN = if_BN
-        self.dilation = 1
-        self.aux = aux
-        self.use_skip = use_skip
-
-        self.groups = groups
-        self.base_width = width_per_group
+        self.inplanes = 64
 
         self.initial_conv_lidar = nn.Sequential(BasicConv2d(5, 64, kernel_size=3, padding=1),
-                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                          BasicConv2d(128, 128, kernel_size=3, padding=1))
+                                          BasicConv2d(64, self.inplanes, kernel_size=3, padding=1))
         
         self.initial_conv_rgb = nn.Sequential(BasicConv2d(3, 64, kernel_size=3, padding=1),
-                                          BasicConv2d(64, 128, kernel_size=3, padding=1),
-                                          BasicConv2d(128, 128, kernel_size=3, padding=1))
+                                          BasicConv2d(64, self.inplanes, kernel_size=3, padding=1))
 
-        self.inplanes = 128
-        embed_dims = [128, 128, 256, 512]
-        aux_dims = (torch.Tensor(embed_dims)*2).int().tolist()
+        # self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
-        self.unet_layers_lidar = nn.ModuleList()
-        for i, j in enumerate([1, 2, 2, 2]):
-            self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
+        # if self.aux:
+        #     self.aux_heads = nn.ModuleDict()
+        #     for i in range(2, 5):
+        #         self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
-        self.unet_layers_rgb = nn.ModuleList()
-        for i, j in enumerate([1, 2, 2, 2]):
-            self.unet_layers_rgb.append(self._make_layer(block, 128, layers[i], stride=j))
-
-        if self.aux:
-            self.aux_heads = nn.ModuleDict()
-            for i in range(1, 4):
-                self.aux_heads["layer{}".format(i)] = nn.Conv2d(aux_dims[i-1], nclasses, 1)
-
-        """FUSION LAYERS"""
-        self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
-        self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
-
-        if not self.use_skip:
-            self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=nclasses,
-                                        embed_dims=embed_dims, num_heads=[1, 2, 4, 8],
-                                        mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
-                                        attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                                        depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1])
-        else:
-            self.end_conv = BasicConv2d(256, nclasses, kernel_size=1)
-            self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=128,
-                                        embed_dims=embed_dims, num_heads=[1, 2, 4, 8],
-                                        mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
-                                        attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                                        depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1])
+        self.segfusion = SegFusion(img_size=[64, 192], patch_size=4, in_chans=self.inplanes, num_classes=nclasses,
+                                      embed_dims=[64, 128, 256, 512], num_heads=[1, 2, 4, 8],
+                                      mlp_ratios=[4, 4, 4, 4], qkv_bias=True, qk_scale=None, drop_rate=0.1,
+                                      attn_drop_rate=0.1, drop_path_rate=0.1, norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                                      depths=[2, 2, 2, 2], sr_ratios=[8, 4, 2, 1])
         
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
-        norm_layer = self._norm_layer
-        downsample = None
-        previous_dilation = self.dilation
-        if dilate:
-            self.dilation *= stride
-            stride = 1
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            if self.if_BN:
-                downsample = nn.Sequential(
-                    conv1x1(self.inplanes, planes * block.expansion, stride),
-                    norm_layer(planes * block.expansion),
-                )
-            else:
-                downsample = nn.Sequential(
-                    conv1x1(self.inplanes, planes * block.expansion, stride)
-                )
-
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, previous_dilation, if_BN=self.if_BN))
-        self.inplanes = planes * block.expansion
-        for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, dilation=self.dilation,
-                                if_BN=self.if_BN))
-
-        return nn.Sequential(*layers)
 
     def forward(self, x, rgb):
-        # * get RGB features
-        proj_size = x.size()[2:]
-        # rgb_out = self.backbone(rgb)
-
         # * get projection features
         x_lidar = self.initial_conv_lidar(x)
         x_rgb = self.initial_conv_rgb(rgb)
-        """FUSION MAIN SCALES"""
-        x_lidar_features = {'0': x_lidar}
-        x_rgb_features = {'0': x_rgb}
-        del x_lidar
-        del x_rgb
 
-        for i in range(0, 4):
-            x_lidar_features[str(i + 1)] = self.unet_layers_lidar[i](x_lidar_features[str(i)])
-            x_rgb_features[str(i + 1)] = self.unet_layers_rgb[i](x_rgb_features[str(i)])
-
-        for i in range(2, 5):
-            x_lidar_features[str(i)] = F.interpolate(
-                x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
-        for i in range(0, 5):
-            x_rgb_features[str(i)] = F.interpolate(
-                x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
-            
-        x_lidar_features = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
-        x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
-        out, aux_outputs = self.fusion_layer(x_lidar_features, x_rgb_features)
-        if self.use_skip:
-            out = self.end_conv(torch.cat([out, x_lidar_features], dim=1))
+        out = self.segfusion(x_lidar, x_rgb)
 
         out = F.softmax(out, dim=1)
 
-        if self.aux:
-            out = [out]
-            for i in range(0, 3):
-                out.append(self.aux_heads["layer{}".format(i+1)](F.interpolate(aux_outputs[i],
-                                                                 size=proj_size, mode='bilinear', align_corners=False)))
-                out[-1] = F.softmax(out[-1], dim=1)
+        # if self.aux:
+        #     out = [out]
+        #     for i in range(2, 5):
+        #         out.append(self.aux_heads["layer{}".format(i)](x_lidar_features[i]))
+        #         out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
-
-class Upscale_head(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, size_in: tuple, size_out: tuple) -> None:
-        super(Upscale_head, self).__init__()
-        inter_channels = in_channels // 4
-        h_in, w_in = size_in
-        h_out, w_out = size_out
-        self.size_inter = ((h_in + h_out) // 2, (w_in + w_out) // 2)
-        self.size_out = size_out
-
-        self.conv1 = nn.Conv2d(
-            in_channels, inter_channels, 1, padding=0, bias=False)
-        self.bn1 = nn.BatchNorm2d(inter_channels)
-
-        self.conv2 = nn.Conv2d(
-            inter_channels, out_channels, 1, padding=0, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.1)
-
-    def forward(self, x):
-        x_inter = self.conv1(F.interpolate(
-            x, size=self.size_inter, mode='bilinear', align_corners=True))
-        x_inter = self.relu(self.bn1(x_inter))
-
-        x_out = self.conv2(F.interpolate(
-            x_inter, size=self.size_out, mode='bilinear', align_corners=True))
-        x_out = self.relu(self.bn2(x_out))
-        return x_out
 
 class SegFusion(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dims=[64, 128, 256, 512],
@@ -200,6 +83,7 @@ class SegFusion(nn.Module):
                  attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm,
                  depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1]):
         super().__init__()
+        self.num_classes = num_classes
         self.depths = depths
         in_channels_head = (torch.Tensor(embed_dims)*2).int().tolist()
         def divide(tuple_data, divisor):
@@ -342,7 +226,7 @@ class SegFusion(nn.Module):
             sr_ratio=sr_ratios[3])
         self.norm_rgb4 = norm_layer(embed_dims[3])
 
-        self.head = SegFormerHead(embedding_dim=256, in_channels_head=in_channels_head, num_classes=num_classes, img_size=img_size)
+        self.head = SegFormerHead(embedding_dim=512, in_channels_head=in_channels_head, img_size=img_size, num_classes=self.num_classes)
 
         self.apply(self._init_weights)
 
@@ -441,10 +325,10 @@ class SegFusion(nn.Module):
         return outs
 
     def forward(self, x, y):
-        x_before_head = self.forward_features(x, y)
-        x = self.head(x_before_head)
+        x = self.forward_features(x, y)
+        x = self.head(x)
 
-        return x, x_before_head
+        return x
     
 class CrossAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., sr_ratio=1):
@@ -550,5 +434,5 @@ class CrossAttentionBlock(nn.Module):
         return x
 
 if __name__ == "__main__":
-    model = Fusion(20, True, use_skip=False).cuda()
+    model = Fusion(20, False).cuda()
     overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
