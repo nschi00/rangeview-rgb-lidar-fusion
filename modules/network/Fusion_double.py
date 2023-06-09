@@ -43,6 +43,7 @@ class Fusion(nn.Module):
         self.if_BN = if_BN
         self.dilation = 1
         self.aux = aux
+        self.use_skip = use_skip
 
         self.groups = groups
         self.base_width = width_per_group
@@ -83,8 +84,8 @@ class Fusion(nn.Module):
                     window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8, 8],
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
-        
-        self.end_conv = BasicConv2d(256, 128, kernel_size=1)
+        if self.use_skip:
+            self.end_conv = BasicConv2d(256, 128, kernel_size=1)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -141,9 +142,10 @@ class Fusion(nn.Module):
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
         x_lidar_features_cat = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
-        x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
-        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features)
-        out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
+        x_rgb_features_cat = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
+        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features_cat)
+        if self.use_skip:
+            out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
 
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
@@ -152,6 +154,7 @@ class Fusion(nn.Module):
             out = [out]
             for i in range(2, 5):
                 out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+                out.append(self.aux_heads["layer{}".format(i)](x_rgb_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
 
         return out
@@ -442,5 +445,5 @@ class SwinFusion(nn.Module):
 
 
 if __name__ == "__main__":
-    model = Fusion(20, True, use_skip=False).cuda()
+    model = Fusion(20, True, use_skip=True).cuda()
     overfit_test(model, 1, (3, 64, 192), (5, 64, 192))

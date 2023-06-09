@@ -197,13 +197,13 @@ class SemanticKitti(Dataset):
     drop_points = False
     if self.transform:
         if random.random() > 0.5:
-            if random.random() > 0.5:
-                DA = True
+            # if random.random() > 0.5:
+            #     DA = True
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.rgb_transform_random(rgb_data)
-            if random.random() > 0.5:
-                rot = True
+            # if random.random() > 0.5:
+            #     rot = True
             drop_points = random.uniform(0, 0.5)
 
     if self.gt:
