@@ -191,7 +191,7 @@ class Trainer():
                 #                     stage=F_config["stage"])
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
                                           aux=self.ARCH["train"]["aux_loss"],
-                                          use_skip=True)
+                                          use_skip=False)
                 convert_relu_to_softplus(self.model, activation)
                 #self.model = Fusion(self.parser.get_n_classes())
             else:

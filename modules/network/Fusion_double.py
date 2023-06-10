@@ -74,8 +74,8 @@ class Fusion(nn.Module):
                 self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
-        self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
-        self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
+        self.conv_before_fusion_lidar = MLP_Swin(640, 128)
+        self.conv_before_fusion_rgb = MLP_Swin(640, 128)
         upscale = 4
         window_size = 8
         height = (64 // upscale // window_size + 1) * window_size
@@ -155,9 +155,9 @@ class Fusion(nn.Module):
             for i in range(2, 5):
                 out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
-            for i in range(2, 5):
-                out.append(self.aux_heads["layer{}".format(i)](x_rgb_features["{}".format(i)]))
-                out[-1] = F.softmax(out[-1], dim=1)
+            # for i in range(2, 5):
+            #     out.append(self.aux_heads["layer{}".format(i)](x_rgb_features["{}".format(i)]))
+            #     out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
@@ -446,6 +446,21 @@ class SwinFusion(nn.Module):
     #     return flops    
 
 
+class MLP_Swin(nn.Module):
+    """
+    Linear Embedding
+    """
+    def __init__(self, input_dim=2048, embed_dim=768):
+        super().__init__()
+        self.proj = nn.Linear(input_dim, embed_dim)
+
+    def forward(self, x):
+        _, _, H, W = x.shape
+        x = x.flatten(2).transpose(1, 2)
+        x = self.proj(x).transpose(1, 2).unflatten(2, (H, W))
+        return x
+
+
 if __name__ == "__main__":
-    model = Fusion(20, True, use_skip=True).cuda()
+    model = Fusion(20, True, use_skip=False).cuda()
     overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
