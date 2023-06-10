@@ -154,6 +154,8 @@ class Fusion(nn.Module):
             out = [out]
             for i in range(2, 5):
                 out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+                out[-1] = F.softmax(out[-1], dim=1)
+            for i in range(2, 5):
                 out.append(self.aux_heads["layer{}".format(i)](x_rgb_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
 

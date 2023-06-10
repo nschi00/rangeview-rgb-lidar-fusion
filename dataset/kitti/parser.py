@@ -111,7 +111,8 @@ class SemanticKitti(Dataset):
     if rgb_resize:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
-      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240)),
+                                       TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
