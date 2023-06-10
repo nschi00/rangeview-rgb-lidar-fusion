@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["-d", "/media/nico/TOSHIBA EXT/SemanticKITTI/dataset", "-ac", "config/arch/fusion-mask2former-512.yml", "-n", "cenet_mask2former_conv_upsample_train_everything"]
+            "args": ["-d", "/media/nico/TOSHIBA EXT/SemanticKITTI/dataset", "-ac", "config/arch/fusion-512-subset.yml", "-n", "test"]
         }
     ]
 }

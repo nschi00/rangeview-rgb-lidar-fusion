@@ -33,7 +33,7 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_skip=True):
+                 norm_layer=None, groups=1, width_per_group=64, use_skip=False):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
@@ -142,6 +142,7 @@ class Fusion(nn.Module):
         for i in range(2, 5):
             x_lidar_features[str(i)] = F.interpolate(
                 x_lidar_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
+        for i in range(0, 5):
             x_rgb_features[str(i)] = F.interpolate(
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
@@ -162,37 +163,6 @@ class Fusion(nn.Module):
 
         return out
 
-
-class Upscale_head(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, size_in: tuple, size_out: tuple) -> None:
-        super(Upscale_head, self).__init__()
-        inter_channels = in_channels // 4
-        h_in, w_in = size_in
-        h_out, w_out = size_out
-        self.size_inter = ((h_in + h_out) // 2, (w_in + w_out) // 2)
-        self.size_out = size_out
-
-        self.conv1 = nn.Conv2d(
-            in_channels, inter_channels, 1, padding=0, bias=False)
-        self.bn1 = nn.BatchNorm2d(inter_channels)
-
-        self.conv2 = nn.Conv2d(
-            inter_channels, out_channels, 1, padding=0, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.1)
-
-    def forward(self, x):
-        x_inter = self.conv1(F.interpolate(
-            x, size=self.size_inter, mode='bilinear', align_corners=True))
-        x_inter = self.relu(self.bn1(x_inter))
-
-        x_out = self.conv2(F.interpolate(
-            x_inter, size=self.size_out, mode='bilinear', align_corners=True))
-        x_out = self.relu(self.bn2(x_out))
-        return x_out
-
 class SegFusion(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dims=[64, 128, 256, 512],
                  num_heads=[1, 2, 4, 8], mlp_ratios=[4, 4, 4, 4], qkv_bias=False, qk_scale=None, drop_rate=0.,
@@ -212,7 +182,7 @@ class SegFusion(nn.Module):
                                               embed_dim=embed_dims[0])
         self.patch_embed_lidar2 = OverlapPatchEmbed(img_size=divide(img_size, 2),
                                               patch_size=patch_size,
-                                              stride=2,
+                                              stride=1,
                                               in_chans=embed_dims[0],
                                               embed_dim=embed_dims[1])
         self.patch_embed_lidar3 = OverlapPatchEmbed(img_size=divide(img_size, 4),
@@ -233,7 +203,7 @@ class SegFusion(nn.Module):
                                               embed_dim=embed_dims[0])
         self.patch_embed_rgb2 = OverlapPatchEmbed(img_size=divide(img_size, 2),
                                               patch_size=patch_size,
-                                              stride=2,
+                                              stride=1,
                                               in_chans=embed_dims[0],
                                               embed_dim=embed_dims[1])
         self.patch_embed_rgb3 = OverlapPatchEmbed(img_size=divide(img_size, 4),
@@ -550,4 +520,4 @@ class CrossAttentionBlock(nn.Module):
 
 if __name__ == "__main__":
     model = Fusion(20, True, use_skip=False).cuda()
-    overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
+    overfit_test(model, 1, (3, 376, 1240), (5, 64, 192))

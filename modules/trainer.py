@@ -22,9 +22,9 @@ from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 # pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-# from modules.network.Fusion_double_segformer import Fusion
+from modules.network.Fusion_double import Fusion
 #from modules.network.ResNetFusion import Fusion
-from modules.network.Fusion_resnet_segformer import Fusion
+# from modules.network.Fusion_resnet_segformer import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
 
@@ -192,7 +192,7 @@ class Trainer():
                 #                     stage=F_config["stage"])
                 self.model = Fusion(nclasses=self.parser.get_n_classes(),
                                           aux=self.ARCH["train"]["aux_loss"],
-                                          use_skip=False)
+                                          use_skip=True)
                 convert_relu_to_softplus(self.model, activation)
                 #self.model = Fusion(self.parser.get_n_classes())
             else:

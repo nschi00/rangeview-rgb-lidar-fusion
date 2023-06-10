@@ -69,7 +69,7 @@ class Fusion(nn.Module):
 
         """FUSION LAYERS"""
         self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
-        self.conv_before_fusion_rgb = BasicConv2d(256, 128, kernel_size=1, padding=0)
+        self.conv_before_fusion_rgb = BasicConv2d(256*4, 128, kernel_size=1, padding=0)
 
         if not self.use_skip:
             self.fusion_layer = SegFusion(img_size=[64, 192], patch_size=3, in_chans=128, num_classes=nclasses,
@@ -123,6 +123,9 @@ class Fusion(nn.Module):
         # * get RGB features
         proj_size = x.size()[2:]
 
+        for i in range(0, 4):
+            pass
+        
         x_rgb_features = self.resnet(self.resnet_transforms(rgb))['0']
         
         x_rgb_features = F.interpolate(

@@ -111,7 +111,12 @@ class SemanticKitti(Dataset):
     if rgb_resize == True:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
-      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
+      # self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((188, 620))])
+
+    if self.transform == True:
+      self.img_augment = TF.Compose([TF.ColorJitter(), TF.RandomGrayscale(), TF.GaussianBlur(kernel_size=5, sigma=(0.1, 5)),
+                                     TF.RandomAdjustSharpness(sharpness_factor=2), TF.RandomAutocontrast(), TF.RandomInvert()])
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
@@ -196,6 +201,7 @@ class SemanticKitti(Dataset):
     rot = False
     drop_points = False
     if self.transform:
+            rgb_data = self.img_augment(rgb_data)
     #     if random.random() > 0.5:
     #         if random.random() > 0.5:
     #             DA = True
