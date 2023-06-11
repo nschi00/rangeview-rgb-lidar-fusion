@@ -13,7 +13,7 @@ class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
     EXTENSIONS_SCAN = ['.bin']
 
-    def __init__(self, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0,DA=False,flip_sign=False,rot=False,drop_points=False):
+    def __init__(self, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0,DA=False,flip_sign=False,rot=False,drop_points=False,rotx=False):
         self.project = project
         self.proj_H = H
         self.proj_W = W
@@ -23,6 +23,7 @@ class LaserScan:
         self.flip_sign = flip_sign
         self.rot = rot
         self.drop_points = drop_points
+        self.rotx = rotx
 
         self.reset()
 
@@ -135,9 +136,14 @@ class LaserScan:
             self.points[:, 0] += jitter_x
             self.points[:, 1] += jitter_y
             self.points[:, 2] += jitter_z
-        if self.rot:
-            euler_angle = np.random.normal(0, 90, 1)[0]  # 40
-            r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        # if self.rot:
+        #     euler_angle = np.random.normal(0, 90, 1)[0]  # 40
+        #     r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+        #     r_t = r.transpose()
+        #     self.points = self.points.dot(r_t)
+        #     self.points = np.squeeze(self.points)
+        if self.rotx is not False:
+            r = np.array(R.from_euler('zyx', [[0, 0, self.rotx]], degrees=True).as_matrix())
             r_t = r.transpose()
             self.points = self.points.dot(r_t)
             self.points = np.squeeze(self.points)
@@ -442,8 +448,8 @@ class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
     EXTENSIONS_LABEL = ['.label']
 
-    def __init__(self, sem_color_dict=None, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0, max_classes=300,DA=False,flip_sign=False,rot=False,drop_points=False):
-        super(SemLaserScan, self).__init__(project, H, W, fov_up, fov_down,DA=DA,flip_sign=flip_sign,rot=rot,drop_points=drop_points)
+    def __init__(self, sem_color_dict=None, project=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0, max_classes=300,DA=False,flip_sign=False,rot=False,drop_points=False,rotx=False):
+        super(SemLaserScan, self).__init__(project, H, W, fov_up, fov_down,DA=DA,flip_sign=flip_sign,rot=rot,drop_points=drop_points,rotx=rotx)
         self.reset()
 
         # make semantic colors

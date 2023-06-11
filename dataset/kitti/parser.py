@@ -109,9 +109,11 @@ class SemanticKitti(Dataset):
     self.transform = transform
 
     if rgb_resize:
-      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W)),
+                                       TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
-      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240)),
+                                       TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
@@ -195,17 +197,21 @@ class SemanticKitti(Dataset):
     flip_sign = False
     rot = False
     drop_points = False
+    rotx = False
     if self.transform:
         if random.random() > 0.5:
             # if random.random() > 0.5:
             #     DA = True
-            #     print("DA activated")
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.rgb_transform_random(rgb_data)
+            if random.random() > 0.5:
+                rot = True
+                print("Rotation around z activated.")
             # if random.random() > 0.5:
-            #     rot = True
-            #     print("rot activated")
+            #   rotx = np.random.normal(-10, 10, 1)[0]
+            #   rgb_data = TF.functional.rotate(rgb_data, rotx)
+            #   print("Rotation around x activated.")
             drop_points = random.uniform(0, 0.5)
 
     if self.gt:
@@ -218,7 +224,8 @@ class SemanticKitti(Dataset):
                           DA=DA,
                           flip_sign=flip_sign,
                           rot=rot,
-                          drop_points=drop_points)
+                          drop_points=drop_points,
+                          rotx=rotx)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
@@ -228,7 +235,8 @@ class SemanticKitti(Dataset):
                        DA=DA,
                        flip_sign=flip_sign,
                        rot=rot,
-                       drop_points=drop_points)
+                       drop_points=drop_points,
+                       rotx=rotx)
 
     # open and obtain scan
     scan.open_scan(scan_file, self.only_lidar_front)
@@ -300,18 +308,16 @@ class SemanticKitti(Dataset):
       out_img = cv2.applyColorMap(
             depth, get_mpl_colormap('viridis')) * mask_np[..., None]
       
-      name = "Test.png"
+      name = "Depth Map.png"
       cv2.imwrite(name, out_img)
       
-      name = "Resized.png"
-
+      name = "Labels.png"
       # put label in original values
       label = SemanticKitti.map(proj_labels, self.learning_map_inv)
       # put label in color
       colormap = SemanticKitti.map(label, self.color_map)
       cv2.imwrite(name, colormap)
-
-      # cv2.imwrite("RGB Translation")
+      cv2.imwrite("Image.png", (rgb_data*255).permute(1,2,0).numpy())
 
 
     projected_data = [proj, 
@@ -336,12 +342,6 @@ class SemanticKitti(Dataset):
 
   def __len__(self):
     return len(self.scan_files)
-  
-  def translate_image(self, image, dx, dy):
-    rows, cols = image.shape[:2]
-    translation_matrix = np.float32([[1, 0, dx], [0, 1, dy], [2, 0, 0]])
-    translated_image = cv2.warpPerspective(image, translation_matrix, (cols, rows))
-    return translated_image
 
   @staticmethod
   def map(label, mapdict):
