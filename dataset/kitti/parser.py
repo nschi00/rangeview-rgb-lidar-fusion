@@ -65,7 +65,8 @@ class SemanticKitti(Dataset):
                sensor,              # sensor to parse scans from
                max_points=150000,   # max number of points present in dataset
                gt=True,
-               transform=False):            # send ground truth?
+               transform=False,
+               old_aug=True):            # send ground truth?
     # save deats
     self.root = os.path.join(root, "sequences")
     self.sequences = sequences
@@ -87,20 +88,24 @@ class SemanticKitti(Dataset):
     self.transform = transform
     self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     if self.transform:
-      self.aug_prob = {"scaling": 0.0,
-                       "rotation": 0.5,
-                       "jittering": 0.5,
-                       "flipping": 0.5,
-                       "point_dropping": [0.5, 0.5]}
-      # self.aug_prob = {"scaling": 1.0,
-      #                  "rotation": 1.0,
-      #                  "jittering": 1.0,
-      #                  "flipping": 1.0,
-      #                  "point_dropping": [0.9, 0.1]}
+      if old_aug:
+        self.aug_prob = {"scaling": 0.0,
+                         "rotation": 0.5,
+                         "jittering": 0.5,
+                         "flipping": 0.5,
+                         "point_dropping": [0.5, 0.5],
+                         "type": "old"}
+      else:
+        self.aug_prob = {"scaling": 1.0,
+                        "rotation": 1.0,
+                        "jittering": 1.0,
+                        "flipping": 1.0,
+                        "point_dropping": [0.9, 0.1],
+                        "type": "new"}
       print(self.aug_prob)
     else:
-      self.aug_prob = defaultdict(int)
-      self.aug_prob["point_dropping"] = [0.0, 0.0]
+      self.aug_prob = defaultdict(lambda: -1.0)
+      self.aug_prob["point_dropping"] = [-1.0, -1.0]
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -300,7 +305,8 @@ class Parser():
                workers,           # threads to load data
                gt=True,           # get gt?
                shuffle_train=True,
-               subset_ratio=1.0):  # shuffle training set?
+               subset_ratio=1.0,
+               old_aug = True):
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -332,7 +338,8 @@ class Parser():
                                        sensor=self.sensor,
                                        max_points=max_points,
                                        transform=True,
-                                       gt=self.gt)
+                                       gt=self.gt,
+                                       old_aug=old_aug)
     
     self.valid_dataset = SemanticKitti(root=self.root,
                                        sequences=self.valid_sequences,

@@ -9,10 +9,10 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'modules'))
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 from overfit_test import overfit_test
-from mix_transformer import MixVisionTransformer, Mlp
+from mix_transformer import MixVisionTransformer
 from timm.models.layers import trunc_normal_
 
-from segformer_head import SegFormerHead, MLP
+from segformer_head import SegFormerHead
 
 class BasicConv2d(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, relu=True):
@@ -48,21 +48,12 @@ class RangeFormer(nn.Module):
                                           patch_size=3, 
                                           in_chans=128,
                                           embed_dims=embed_dims,
+                                          #num_heads=[1, 2, 5, 8],
                                           sr_ratios=[16, 8, 2, 1])
         self.decoder = SegFormerHead(embedding_dim=128,
                                      in_channels_head=embed_dims,
                                      num_classes=n_classes,
                                      img_size=img_size)
-        # self.end_mlp = nn.Sequential(BasicConv2d(128*4, 128, kernel_size=3, padding=1),
-        #                              BasicConv2d(128, n_classes, kernel_size=3, padding=1))
-        # self.unify_mlp = nn.ModuleList([BasicConv2d(embed_dims[0], 128, kernel_size=3, padding=1),
-        #                                 BasicConv2d(embed_dims[1], 128, kernel_size=3, padding=1),
-        #                                 BasicConv2d(embed_dims[2], 128, kernel_size=3, padding=1),
-        #                                 BasicConv2d(embed_dims[3], 128, kernel_size=3, padding=1)])
-        # self.aux_mlp = nn.ModuleList([BasicConv2d(128, n_classes, kernel_size=1),
-        #                               BasicConv2d(128, n_classes, kernel_size=1),
-        #                               BasicConv2d(128, n_classes, kernel_size=1),
-        #                               BasicConv2d(128, n_classes, kernel_size=1)])
 
     def forward(self, lidar, _):
         B, _, H, W = lidar.shape
@@ -70,16 +61,6 @@ class RangeFormer(nn.Module):
         lidar_feats = self.rem(lidar)
         lidar_atts = self.model(lidar_feats)
         out = self.decoder(lidar_atts)
-        # for i, att in enumerate(lidar_atts):
-        #     lidar_atts[i] = F.interpolate(self.unify_mlp[i](att), (H,W), mode='bilinear', align_corners=True)
-
-        # out = []
-        # final_pred = F.softmax(self.end_mlp(torch.cat(lidar_atts, dim=1)), dim=1)
-        # out.append(final_pred)
-        # for i, att in enumerate(lidar_atts):
-        #     aux_out = self.aux_mlp[i](att)
-        #     out.append(F.softmax(aux_out, dim = 1))
-
         return out
 
     def _init_weights(self, m):

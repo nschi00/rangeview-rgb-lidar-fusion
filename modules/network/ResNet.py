@@ -4,14 +4,6 @@ sys.path.append('/home/son/project/pham_wrapper/CENet')
 import torch.nn as nn
 import torch
 from torch.nn import functional as F
-import numpy as np
-# from torchvision.models.segmentation import fcn_resnet50, FCN_ResNet50_Weights, deeplabv3_resnet50
-# from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
-
-# from third_party.SwinFusion.models.network_swinfusion import SwinFusion as net
-from torchvision.transforms.transforms import Resize
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):

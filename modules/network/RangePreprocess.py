@@ -1,7 +1,5 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import copy
+from collections import defaultdict
 import random
 
 class RangePreprocess():
@@ -16,15 +14,20 @@ class RangePreprocess():
         if not training:
             return data, mask, label.long()
         bs = data.shape[0]
+        assert bs > 2, "Batch size should be larger than 2"
         out_scan = []
         out_label = []
+        matched_dict = defaultdict(lambda: -1)
         for i in range(bs):
             j = random.randint(0, bs-1)
-            while j == i:
+            while j == i or matched_dict[j] == i:
                 j = random.randint(0, bs-1)
+            matched_dict[i] = j
+                
             scan_a, scan_b = data[i].clone(), data[j]
             label_a, label_b = label[i].clone(), label[j]
 
+            
             if torch.rand(1) < self.aug_prob[0]:
                 scan_a, label_a = self.RangeMix(scan_a, label_a, scan_b, label_b)
             if torch.rand(1) < self.aug_prob[1]:
@@ -64,18 +67,25 @@ class RangePreprocess():
         p = torch.randint(low=int(0.25*w), high=int(0.75*w), size=(1,))
         scan_a = torch.cat([scan_a[:, :, p:], scan_a[:, :, :p]], dim=2)
         label_a = torch.cat([label_a[:, p:], label_a[:, :p]], dim=1)
-        # scan_a = torch.cat(scan_a[:, p:, :], scan_a[:, :p, :], dim = 1)
-        # label_a = torch.cat(label_a[p:, :], label_a[:p, :], dim = 1)
         return scan_a, label_a
     
     
     def RangeMix(self, scan_a, label_a, scan_b, label_b, mix_strategies= [2, 3, 4, 5, 6]):
         _, h, w = scan_a.shape
-        k_mix = random.choice(mix_strategies)
-        index = random.choice(range(k_mix))
-        mix_h_s = int(h / k_mix) * (index)
-        mix_h_e = int(h / k_mix) * (index + 1)
-        scan_a[:, mix_h_s:mix_h_e, :] = scan_b[:, mix_h_s:mix_h_e, :]
-        label_a[mix_h_s:mix_h_e, :] = label_b[mix_h_s:mix_h_e, :]
+        h_mix = random.choice(mix_strategies)
+        w_mix = random.choice(mix_strategies)
+        h_step = int(h/h_mix)
+        w_step = int(w/w_mix)
+        h_index = list(range(0, h, h_step))
+        w_index = list(range(0, w, w_step))
+        for i in range(len(h_index)):
+            for j in range(len(w_index)):
+                if (i + j) % 2 == 1:
+                    h_s = h_index[i]
+                    h_e = h_index[i]+h_step if h_index[i]+h_step < h else -1
+                    w_s = w_index[j]
+                    w_e = w_index[j]+w_step if w_index[j]+w_step < w else -1
+                    scan_a[:, h_s:h_e, w_s:w_e] = scan_b[:, h_s:h_e, w_s:w_e]
+                    label_a[h_s:h_e, w_s:w_e] = label_b[h_s:h_e, w_s:w_e]
         return scan_a, label_a
         

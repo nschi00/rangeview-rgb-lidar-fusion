@@ -112,14 +112,15 @@ class LaserScan:
 
         # put in attribute
         self.points = points  # get
-        if random.random() < self.aug_prob["flipping"]:
-            self.points[:, 1] = -self.points[:, 1]
-        if random.random() < self.aug_prob["jittering"]:
-            self.RandomJittering()
-        if random.random() < self.aug_prob["rotation"]:
-            self.GlobalRotation()
         if random.random() < self.aug_prob["scaling"]:
             self.RandomScaling()
+        if random.random() < self.aug_prob["rotation"]:
+            self.GlobalRotation(mode=self.aug_prob["type"])
+        if random.random() < self.aug_prob["jittering"]:
+            self.RandomJittering(mode=self.aug_prob["type"])
+        if random.random() < self.aug_prob["flipping"]:
+            self.RandomFlipping(mode=self.aug_prob["type"])
+
         if remissions is not None:
             self.remissions = remissions  # get remission
             #if self.DA:
@@ -133,24 +134,47 @@ class LaserScan:
 
     def RandomScaling(self, r_s=0.05):
         scale = np.random.uniform(1, 1+r_s)
-        if np.random.random() < 0.5:
+        if np.random.random(1) < 0.5:
             scale = 1 / scale
             self.points[:, :2] *= scale
     
-    def GlobalRotation(self):
-        euler_angle = np.random.normal(0, 90, 1)[0]  # 40
-        r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
-        r_t = r.transpose()
-        self.points = self.points.dot(r_t)
-        self.points = np.squeeze(self.points)
-    
-    def RandomJittering(self):
-        jitter_x = random.uniform(-3, 3)
-        jitter_y = random.uniform(-3, 3)
-        jitter_z = random.uniform(-1, 0)
-        self.points[:, 0] += jitter_x
-        self.points[:, 1] += jitter_y
-        self.points[:, 2] += jitter_z
+    def GlobalRotation(self, mode):
+        if mode == "old":
+            euler_angle = np.random.normal(0, 90, 1)[0]  # 40
+            r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+            r_t = r.transpose()
+            self.points = self.points.dot(r_t)
+            self.points = np.squeeze(self.points)
+        elif mode == "new":
+            rotate_rad = np.deg2rad(np.random.random() * 360)
+            c, s = np.cos(rotate_rad), np.sin(rotate_rad)
+            j = np.matrix([[c, s], [-s, c]])
+            self.points[:, :2] = np.dot(self.points[:, :2], j)
+        
+    def RandomJittering(self, mode):
+        if mode == "old":
+            jitter_x = random.uniform(-3, 3)
+            jitter_y = random.uniform(-3, 3)
+            jitter_z = random.uniform(-1, 0)
+            self.points[:, 0] += jitter_x
+            self.points[:, 1] += jitter_y
+            self.points[:, 2] += jitter_z
+        elif mode == "new":
+            r_j = 0.3
+            jitter = np.clip(np.random.normal(0, r_j, 3), -r_j, r_j)
+            self.points += jitter
+            
+    def RandomFlipping(self, mode):
+        if mode == "old":
+            flip_type = 2
+        elif mode == "new":
+            flip_type = np.random.choice([1,2,3], 1)[0]
+        if flip_type == 1:
+            self.points[:, 0] = -self.points[:, 0]
+        elif flip_type == 2:
+            self.points[:, 1] = -self.points[:, 1]
+        elif flip_type == 3:
+            self.points[:, :2] = -self.points[:, :2]
     
     def do_fd_projection(self):
       """ Project a pointcloud into a spherical projection image.projection.
