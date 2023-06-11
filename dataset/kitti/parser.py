@@ -111,8 +111,7 @@ class SemanticKitti(Dataset):
     if rgb_resize:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
     else:
-      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240)),
-                                       TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+      self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240))])
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
@@ -200,11 +199,13 @@ class SemanticKitti(Dataset):
         if random.random() > 0.5:
             # if random.random() > 0.5:
             #     DA = True
+            #     print("DA activated")
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.rgb_transform_random(rgb_data)
             # if random.random() > 0.5:
             #     rot = True
+            #     print("rot activated")
             drop_points = random.uniform(0, 0.5)
 
     if self.gt:
@@ -310,6 +311,8 @@ class SemanticKitti(Dataset):
       colormap = SemanticKitti.map(label, self.color_map)
       cv2.imwrite(name, colormap)
 
+      # cv2.imwrite("RGB Translation")
+
 
     projected_data = [proj, 
                       proj_mask, 
@@ -333,6 +336,12 @@ class SemanticKitti(Dataset):
 
   def __len__(self):
     return len(self.scan_files)
+  
+  def translate_image(self, image, dx, dy):
+    rows, cols = image.shape[:2]
+    translation_matrix = np.float32([[1, 0, dx], [0, 1, dy], [2, 0, 0]])
+    translated_image = cv2.warpPerspective(image, translation_matrix, (cols, rows))
+    return translated_image
 
   @staticmethod
   def map(label, mapdict):

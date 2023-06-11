@@ -69,9 +69,11 @@ class Fusion(nn.Module):
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
         if self.aux:
-            self.aux_heads = nn.ModuleDict()
+            self.aux_heads_lidar = nn.ModuleDict()
+            # self.aux_heads_rgb = nn.ModuleDict()
             for i in range(2, 5):
-                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
+                self.aux_heads_lidar["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
+                # self.aux_heads_rgb["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
         self.conv_before_fusion_lidar = MLP_Swin(640, 128)
@@ -153,10 +155,10 @@ class Fusion(nn.Module):
         if self.aux:
             out = [out]
             for i in range(2, 5):
-                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+                out.append(self.aux_heads_lidar["layer{}".format(i)](x_lidar_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
             # for i in range(2, 5):
-            #     out.append(self.aux_heads["layer{}".format(i)](x_rgb_features["{}".format(i)]))
+            #     out.append(self.aux_heads_rgb["layer{}".format(i)](x_rgb_features["{}".format(i)]))
             #     out[-1] = F.softmax(out[-1], dim=1)
 
         return out
