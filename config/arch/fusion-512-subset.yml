@@ -73,7 +73,7 @@ fusion: # only relevant if pipeline == "fusion"
   name_backbone: "resnet50" # "resnet50" or "mask2former"
   stage: "combination" # "enc", "pixel_decoder", "combination"
   only_lidar_front: True
-  rgb_resize: False
+  rgb_resize: True
 
 ################################################################################
 # postproc parameters
