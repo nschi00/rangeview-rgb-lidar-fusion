@@ -58,6 +58,9 @@ class Fusion(nn.Module):
 
         self.inplanes = 128
 
+        self.Fusion_num_heads=[8, 8]
+        self.Fusion_depths = [2, 2]
+
         self.unet_layers_lidar = nn.ModuleList()
         for i, j in enumerate([1, 2, 2, 2]):
             self.unet_layers_lidar.append(self._make_layer(block, 128, layers[i], stride=j))
@@ -69,11 +72,10 @@ class Fusion(nn.Module):
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
         if self.aux:
-            self.aux_heads_lidar = nn.ModuleDict()
+            self.aux_heads = nn.ModuleDict()
             # self.aux_heads_rgb = nn.ModuleDict()
-            for i in range(2, 5):
-                self.aux_heads_lidar["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
-                # self.aux_heads_rgb["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
+            for i in range(len(self.Fusion_depths)):
+                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128*2, nclasses, 1)
 
         """FUSION LAYERS"""
         self.conv_before_fusion_lidar = MLP_Swin(640, 128)
@@ -82,8 +84,8 @@ class Fusion(nn.Module):
         window_size = 8
         height = (64 // upscale // window_size + 1) * window_size
         width = (512 // upscale // window_size + 1) * window_size
-        self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
-                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8, 8],
+        self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width), Fusion_depths=self.Fusion_depths,
+                    window_size=window_size, embed_dim=128, Fusion_num_heads=self.Fusion_num_heads,
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
         if self.use_skip:
@@ -145,7 +147,7 @@ class Fusion(nn.Module):
             
         x_lidar_features_cat = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
         x_rgb_features_cat = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
-        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features_cat)
+        out, x_aux = self.fusion_layer(x_lidar_features_cat, x_rgb_features_cat)
         if self.use_skip:
             out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
 
@@ -154,8 +156,9 @@ class Fusion(nn.Module):
 
         if self.aux:
             out = [out]
-            for i in range(2, 5):
-                out.append(self.aux_heads_lidar["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+            for i in range(len(self.Fusion_num_heads)):
+                out.append(self.aux_heads["layer{}".format(i)](x_aux[i]))
+                # out.append(self.aux_heads_lidar["layer{}".format(i)](x_lidar_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
             # for i in range(2, 5):
             #     out.append(self.aux_heads_rgb["layer{}".format(i)](x_rgb_features["{}".format(i)]))
@@ -390,9 +393,16 @@ class SwinFusion(nn.Module):
         x = self.pos_drop(x)
         y = self.pos_drop(y)
         
+        x_aux = []
         for layer in self.layers_Fusion:
             x, y = layer(x, y, x_size)
             # y = layer(y, x, x_size)
+            ## Auxiliary outputs:
+            x_temp = self.norm_Fusion_A(x)
+            x_temp = self.patch_unembed(x_temp, x_size)
+            y_temp = self.norm_Fusion_A(y)
+            y_temp = self.patch_unembed(y_temp, x_size)
+            x_aux.append(torch.cat([x_temp, y_temp], 1))
             
 
         x = self.norm_Fusion_A(x)  # B L C
@@ -404,7 +414,7 @@ class SwinFusion(nn.Module):
         ## Downsample the feature in the channel dimension
         x = self.lrelu(self.conv_after_body_Fusion(x))
         
-        return x
+        return x, x_aux
 
     def forward_features_Re(self, x):        
         x_size = (x.shape[2], x.shape[3])
@@ -427,12 +437,12 @@ class SwinFusion(nn.Module):
     def forward(self, x, y):
         # print("Initializing the model")
 
-        x = self.forward_features_Fusion(x, y)
+        x, x_aux = self.forward_features_Fusion(x, y)
         x = self.forward_features_Re(x)
 
         _, _, H, W = x.shape            
         
-        return x[:, :, :H*self.upscale, :W*self.upscale]
+        return x[:, :, :H*self.upscale, :W*self.upscale], x_aux
 
     # def flops(self):
     #     flops = 0
@@ -464,5 +474,5 @@ class MLP_Swin(nn.Module):
 
 
 if __name__ == "__main__":
-    model = Fusion(20, True, use_skip=False).cuda()
+    model = Fusion(20, True, use_skip=True).cuda()
     overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
