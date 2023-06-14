@@ -118,7 +118,7 @@ class Trainer():
                                           gt=True,
                                           shuffle_train=True,
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
-                                          old_aug=False)
+                                          old_aug=True)
 
         self.range_preprocess = RangePreprocess()
         # weights for loss (and bias)

@@ -88,4 +88,15 @@ class RangePreprocess():
                     scan_a[:, h_s:h_e, w_s:w_e] = scan_b[:, h_s:h_e, w_s:w_e]
                     label_a[h_s:h_e, w_s:w_e] = label_b[h_s:h_e, w_s:w_e]
         return scan_a, label_a
+    
+    
+    # def RangeMix(self, scan_a, label_a, scan_b, label_b, mix_strategies= [2, 3, 4, 5, 6]):
+    #     _, h, w = scan_a.shape
+    #     k_mix = random.choice(mix_strategies)
+    #     index = random.choice(range(k_mix))
+    #     mix_h_s = int(h / k_mix) * (index)
+    #     mix_h_e = int(h / k_mix) * (index + 1)
+    #     scan_a[:, mix_h_s:mix_h_e, :] = scan_b[:, mix_h_s:mix_h_e, :]
+    #     label_a[mix_h_s:mix_h_e, :] = label_b[mix_h_s:mix_h_e, :]
+    #     return scan_a, label_a
         
