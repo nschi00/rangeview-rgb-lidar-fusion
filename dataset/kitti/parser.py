@@ -208,9 +208,9 @@ class SemanticKitti(Dataset):
             if random.random() > 0.5:
                 rot = True
                 # print("Rotation around z activated.")
-            if random.random() > 0.5:
-              rotx = np.random.normal(-10, 10, 1)[0]
-              rgb_data = TF.functional.rotate(rgb_data, rotx)
+            # if random.random() > 0.5:
+            #   rotx = np.random.normal(-10, 10, 1)[0]
+            #   rgb_data = TF.functional.rotate(rgb_data, rotx)
               # print("Rotation around x activated.")
             drop_points = random.uniform(0, 0.5)
 
