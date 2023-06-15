@@ -485,7 +485,9 @@ class Parser():
                                         learning_map_inv=self.learning_map_inv,
                                         sensor=self.sensor,
                                         max_points=max_points,
-                                        gt=False)
+                                        gt=False,
+                                        only_lidar_front=only_lidar_front,
+                                        rgb_resize=rgb_resize)
 
       self.testloader = torch.utils.data.DataLoader(self.test_dataset,
                                                     batch_size=self.batch_size,

@@ -35,7 +35,10 @@ class User():
                                       batch_size=1,
                                       workers=self.ARCH["train"]["workers"],
                                       gt=True,
-                                      shuffle_train=False)
+                                      shuffle_train=False,
+                                      subset_ratio=self.ARCH["train"]["subset_ratio"],
+                                      only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
+                                      rgb_resize=self.ARCH["fusion"]["rgb_resize"])
 
     # concatenate the encoder and the head
     with torch.no_grad():
@@ -68,6 +71,19 @@ class User():
                 convert_relu_to_softplus(self.model, nn.Hardswish())
             elif self.ARCH["train"]["act"] == "SiLU":
                 convert_relu_to_softplus(self.model, nn.SiLU())
+        if self.ARCH["train"]["pipeline"] == "fusion":
+            from modules.network.Fusion_double import Fusion
+            def convert_relu_to_softplus(model, act):
+                for child_name, child in model.named_children():
+                    if isinstance(child, nn.LeakyReLU):
+                        setattr(model, child_name, act)
+                    else:
+                        convert_relu_to_softplus(child, act)
+            activation = eval("nn." + self.ARCH["train"]["act"] + "()")
+            self.model = Fusion(nclasses=self.parser.get_n_classes(),
+                                        aux=self.ARCH["train"]["aux_loss"],
+                                        use_skip=True)
+            convert_relu_to_softplus(self.model, activation)
 
 #     print(self.model)
     w_dict = torch.load(modeldir + "/SENet_valid_best",
@@ -134,7 +150,8 @@ class User():
       torch.cuda.empty_cache()
 
     with torch.no_grad():
-      for i, (proj_in, proj_mask, _, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(loader):
+      for i, (lidar, rgb) in enumerate(loader):
+        (proj_in, proj_mask, _, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) = lidar
         # first cut to rela size (batch size one allows it)
         p_x = p_x[0, :npoints]
         p_y = p_y[0, :npoints]
@@ -152,12 +169,14 @@ class User():
             unproj_range = unproj_range.cuda()
         end = time.time()
 
+        rgb = rgb.cuda()
+
         if self.ARCH["train"]["aux_loss"]:
             with torch.cuda.amp.autocast(enabled=True):
-                [proj_output, x_2, x_3, x_4] = self.model(proj_in)
+                [proj_output, x_2, x_3, x_4] = self.model(proj_in, rgb)
         else:
             with torch.cuda.amp.autocast(enabled=True):
-                proj_output = self.model(proj_in)
+                proj_output = self.model(proj_in, rgb)
 
         proj_argmax = proj_output[0].argmax(dim=0)
         if torch.cuda.is_available():
