@@ -16,7 +16,7 @@ train:
   show_scans: True       # show scans during training
   save_batch: 50
   max_epochs: 100
-  workers: 5            # number of threads to get data 
+  workers: 0            # number of threads to get data 
   #TODO: Change it back to 4
 
 ################################################################################

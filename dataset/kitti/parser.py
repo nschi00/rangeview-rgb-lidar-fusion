@@ -177,7 +177,7 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index]
-    rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
+    rgb_data = Image.open(self.rgb_files[index])
 
     if self.gt:
       label_file = self.label_files[index]
@@ -200,7 +200,7 @@ class SemanticKitti(Dataset):
                        aug_prob=self.aug_prob)
 
     # open and obtain scan
-    scan.open_scan(scan_file)
+    scan.open_scan(scan_file, rgb_data)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -255,6 +255,8 @@ class SemanticKitti(Dataset):
                       proj_range,  
                       proj_xyz, 
                       proj_remission]
+    
+    rgb_data = self.img_transform(rgb_data)
     # return
     return projected_data, rgb_data
 

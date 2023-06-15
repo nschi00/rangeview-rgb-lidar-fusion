@@ -7,6 +7,10 @@ import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
+from PIL import Image, ImageDraw
+from matplotlib import pyplot as plt
+import vispy
+from vispy.scene import visuals, SceneCanvas
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -61,11 +65,14 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename):
+    def open_scan(self, filename, rgb_data):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
         self.reset()
+
+        self.rgb_data = rgb_data
+        self.filename = filename
 
         # check filename is string
         if not isinstance(filename, str):
@@ -83,6 +90,13 @@ class LaserScan:
         # put in attribute
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
+
+        fov_hor = [-90, 90]
+        fov_vert = [-90, 90]
+        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
+        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
+        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
+
         if random.random() < self.aug_prob["point_dropping"][0]:
             if self.aug_prob["type"] == "new":
                 self.drop_points = random.uniform(0.0, self.aug_prob["point_dropping"][1])
@@ -276,6 +290,16 @@ class LaserScan:
         self.proj_idx[proj_y, proj_x] = indices
         self.proj_mask = (self.proj_idx > 0).astype(np.int32)
 
+        self.point_idx_rv = self.proj_idx[self.proj_idx != -1]
+        self.point_idx_rv_camera_fov = np.intersect1d(self.point_idx_rv, self.point_idx_camera_fov)
+
+        # ! Comment in if visualization is needed
+        self.start_visualization(indices, "All points")
+        self.start_visualization(self.point_idx_rv, "Only Range View")
+        self.start_visualization(self.point_idx_camera_fov, "Only Camera FoV")
+        self.start_visualization(self.point_idx_rv_camera_fov, "Combination of RV and Camera FoV")
+        print("End")
+
     def fill_spherical(self, range_image):
         # fill in spherical image for calculating normal vector
         height, width = np.shape(range_image)[:2]
@@ -322,6 +346,172 @@ class LaserScan:
         normal_vector_camera[:, :, 1] = -normal_vector[:, :, 2]
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
+    
+    def get_lidar_points_in_image_plane(self, points, mask_fov):
+        self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
+
+        # Open the file for reading
+        with open(self.filename, 'r') as file:
+            # Read the contents of the file
+            contents = file.read()
+
+        # Split the contents by lines and process each line
+        lines = contents.split('\n')
+        for line in lines:
+            line = line.strip()  # Remove leading/trailing whitespace
+            if line.startswith('P2:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                P2 = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+            elif line.startswith('Tr:'):
+                numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
+                numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
+
+                # Reshape the list into a 3x4 matrix
+                Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+        
+        # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
+        hom_points = np.ones((np.shape(points)[0], 4))
+        hom_points[:, 0:3] = points
+        trans_points = (Tr @ hom_points.T).T
+        hom_points[:, 0:3] = trans_points
+        proj_points_im = (P2 @ hom_points.T).T
+        proj_points_im[:, 0] /= proj_points_im[:, 2]
+        proj_points_im[:, 1] /= proj_points_im[:, 2]
+        proj_points_im = proj_points_im[:, 0:2]
+
+        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_data._size[0])
+        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_data._size[1])
+
+        combined_condition = condition_col1 & condition_col2 & mask_fov
+
+        indices = np.nonzero(combined_condition)[0]
+
+        return indices
+
+    ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
+    def hv_in_range(self, m, n, fov, fov_type='h'):
+        """ extract filtered in-range velodyne coordinates based on azimuth & elevation angle limit 
+            horizontal limit = azimuth angle limit
+            vertical limit = elevation angle limit
+        """
+        if fov_type == 'h':
+            return np.logical_and(np.arctan2(n, m) > (-fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) < (-fov[0] * np.pi / 180))
+        elif fov_type == 'v':
+            return np.logical_and(np.arctan2(n, m) < (fov[1] * np.pi / 180), \
+                                    np.arctan2(n, m) > (fov[0] * np.pi / 180))
+        else:
+            raise NameError("fov type must be set between 'h' and 'v' ")
+        
+    def points_basic_filter(self, points, h_fov, v_fov):
+        """
+            filter points based on h,v FOV and x,y,z distance range.
+            x,y,z direction is based on velodyne coordinates
+            1. azimuth & elevation angle limit check
+            return a bool array
+        """
+        assert points.shape[1] == 3, points.shape # [N,3]
+        x, y, z = points[:, 0], points[:, 1], points[:, 2]
+        d = np.sqrt(x ** 2 + y ** 2 + z ** 2) # this is much faster than d = np.sqrt(np.power(points,2).sum(1))
+
+        # extract in-range fov points
+        h_points = self.hv_in_range(x, y, h_fov, fov_type='h')
+        v_points = self.hv_in_range(d, z, v_fov, fov_type='v')
+        combined = np.logical_and(h_points, v_points)
+
+        return combined
+    
+    def get_mpl_colormap(self, cmap_name):
+        cmap = plt.get_cmap(cmap_name)
+
+        # Initialize the matplotlib color map
+        sm = plt.cm.ScalarMappable(cmap=cmap)
+
+        # Obtain linear color range
+        color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+
+        return color_range.reshape(256, 3).astype(np.float32) / 255.0
+    
+    def start_visualization(self, indices, title):
+        self.action = "no"  # no, next, back, quit are the possibilities
+        self.indices = indices
+        self.viz_title = title
+
+        # new canvas prepared for visualizing data
+        self.canvas = SceneCanvas(keys='interactive', show=True)
+        # interface (n next, b back, q quit, very simple)
+        self.canvas.events.key_press.connect(self.key_press)
+        self.canvas.events.draw.connect(self.draw)
+        # grid
+        self.grid = self.canvas.central_widget.add_grid()
+
+        # laserscan part
+        self.scan_view = vispy.scene.widgets.ViewBox(
+            border_color='white', parent=self.canvas.scene)
+        self.grid.add_widget(self.scan_view, 0, 0)
+        self.scan_vis = visuals.Markers()
+        self.scan_view.camera = 'turntable'
+        self.scan_view.add(self.scan_vis)
+        visuals.XYZAxis(parent=self.scan_view.scene)
+
+        self.update_scan()
+        self.run()
+
+    def update_scan(self):
+        # then change names
+        title = self.viz_title
+        self.canvas.title = title
+
+        # plot scan
+        power = 16
+        # print()
+        range_data = np.copy(self.unproj_range[self.indices])
+        # range_data = np.copy(self.unproj_range)
+        # print(range_data.max(), range_data.min())
+        range_data = range_data**(1 / power)
+        # print(range_data.max(), range_data.min())
+        viridis_range = ((range_data - range_data.min()) /
+                        (range_data.max() - range_data.min()) *
+                        255).astype(np.uint8)
+        viridis_map = self.get_mpl_colormap("viridis")
+        viridis_colors = viridis_map[viridis_range]
+        self.scan_vis.set_data(self.points[self.indices],
+                                face_color=viridis_colors[..., ::-1],
+                                edge_color=viridis_colors[..., ::-1],
+                                size=1)
+
+      # interface
+    def key_press(self, event):
+        self.canvas.events.key_press.block()
+        if event.key == 'N':
+            self.offset += 1
+            if self.offset >= self.total:
+                self.offset = 0
+            self.update_scan()
+        elif event.key == 'B':
+            self.offset -= 1
+            if self.offset < 0:
+                self.offset = self.total - 1
+            self.update_scan()
+        elif event.key == 'Q' or event.key == 'Escape':
+            self.destroy()
+
+    def draw(self, event):
+        if self.canvas.events.key_press.blocked():
+            self.canvas.events.key_press.unblock()
+
+    def destroy(self):
+        # destroy the visualization
+        self.canvas.close()
+        if self.images:
+            self.img_canvas.close()
+        vispy.app.quit()
+
+    def run(self):
+        vispy.app.run()
 
 class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
