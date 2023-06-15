@@ -294,11 +294,11 @@ class LaserScan:
         self.point_idx_rv_camera_fov = np.intersect1d(self.point_idx_rv, self.point_idx_camera_fov)
 
         # ! Comment in if visualization is needed
-        self.start_visualization(indices, "All points")
-        self.start_visualization(self.point_idx_rv, "Only Range View")
-        self.start_visualization(self.point_idx_camera_fov, "Only Camera FoV")
-        self.start_visualization(self.point_idx_rv_camera_fov, "Combination of RV and Camera FoV")
-        print("End")
+        # self.start_visualization(indices, "All points")
+        # self.start_visualization(self.point_idx_rv, "Only Range View")
+        # self.start_visualization(self.point_idx_camera_fov, "Only Camera FoV")
+        # self.start_visualization(self.point_idx_rv_camera_fov, "Combination of RV and Camera FoV")
+        # print("End")
 
     def fill_spherical(self, range_image):
         # fill in spherical image for calculating normal vector
@@ -369,15 +369,14 @@ class LaserScan:
                 numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
                 numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
 
-                # Reshape the list into a 3x4 matrix
-                Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+                # Reshape the list into a 4x4 matrix
+                Tr = np.eye(4)
+                Tr[0:3, 0:4] = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
         
         # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
         hom_points = np.ones((np.shape(points)[0], 4))
         hom_points[:, 0:3] = points
-        trans_points = (Tr @ hom_points.T).T
-        hom_points[:, 0:3] = trans_points
-        proj_points_im = (P2 @ hom_points.T).T
+        proj_points_im = (P2 @ Tr @ hom_points.T).T
         proj_points_im[:, 0] /= proj_points_im[:, 2]
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]
