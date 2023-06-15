@@ -72,7 +72,7 @@ class User():
             elif self.ARCH["train"]["act"] == "SiLU":
                 convert_relu_to_softplus(self.model, nn.SiLU())
         if self.ARCH["train"]["pipeline"] == "fusion":
-            from modules.network.Fusion_double import Fusion
+            from modules.network.Fusion_double_visualize_HR import Fusion
             def convert_relu_to_softplus(model, act):
                 for child_name, child in model.named_children():
                     if isinstance(child, nn.LeakyReLU):
@@ -81,8 +81,7 @@ class User():
                         convert_relu_to_softplus(child, act)
             activation = eval("nn." + self.ARCH["train"]["act"] + "()")
             self.model = Fusion(nclasses=self.parser.get_n_classes(),
-                                        aux=self.ARCH["train"]["aux_loss"],
-                                        use_skip=True)
+                                        aux=self.ARCH["train"]["aux_loss"])
             convert_relu_to_softplus(self.model, activation)
 
 #     print(self.model)

@@ -2,8 +2,6 @@ import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
 sys.path.append(os.getcwd())
-sys.path.append("modules")
-from overfit_test import overfit_test
 
 from torch.nn import functional as F
 from timm.models.layers import to_2tuple, trunc_normal_
@@ -11,7 +9,6 @@ from third_party.SwinFusion.models.network_swinfusion1 import RSTB, CRSTB, Patch
 from ResNet import BasicBlock, BasicConv2d, conv1x1
 import torch
 import torch.nn as nn
-
 import matplotlib.pyplot as plt
 
 
@@ -34,7 +31,7 @@ class Fusion(nn.Module):
     """
 
     def __init__(self, nclasses, aux=True, block=BasicBlock, layers=[3, 4, 6, 3], if_BN=True,
-                 norm_layer=None, groups=1, width_per_group=64, use_skip=True):
+                 norm_layer=None, groups=1, width_per_group=64):
 
         super(Fusion, self).__init__()
         if norm_layer is None:
@@ -45,7 +42,6 @@ class Fusion(nn.Module):
         self.if_BN = if_BN
         self.dilation = 1
         self.aux = aux
-        self.use_skip = use_skip
 
         self.groups = groups
         self.base_width = width_per_group
@@ -71,25 +67,23 @@ class Fusion(nn.Module):
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
         if self.aux:
-            self.aux_heads_lidar = nn.ModuleDict()
-            # self.aux_heads_rgb = nn.ModuleDict()
+            self.aux_heads = nn.ModuleDict()
             for i in range(2, 5):
-                self.aux_heads_lidar["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
-                # self.aux_heads_rgb["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
+                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128, nclasses, 1)
 
         """FUSION LAYERS"""
-        self.conv_before_fusion_lidar = MLP_Swin(640, 128)
-        self.conv_before_fusion_rgb = MLP_Swin(640, 128)
+        self.conv_before_fusion_lidar = BasicConv2d(640, 128, kernel_size=1, padding=0)
+        self.conv_before_fusion_rgb = BasicConv2d(640, 128, kernel_size=1, padding=0)
         upscale = 4
         window_size = 8
         height = (64 // upscale // window_size + 1) * window_size
         width = (512 // upscale // window_size + 1) * window_size
         self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width),
-                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8, 8],
+                    window_size=window_size, embed_dim=128, Fusion_num_heads=[8, 8],
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
-        if self.use_skip:
-            self.end_conv = BasicConv2d(256, 128, kernel_size=1)
+        
+        self.end_conv = BasicConv2d(256, 128, kernel_size=1)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
@@ -146,7 +140,7 @@ class Fusion(nn.Module):
                 x_rgb_features[str(i)], size=proj_size, mode='bilinear', align_corners=True)
             
         x_lidar_features_cat = self.conv_before_fusion_lidar(torch.cat(list(x_lidar_features.values()), dim=1))
-        
+
         processed = []
         for i in range(x_lidar_features_cat.shape[1]):
             gray_scale = x_lidar_features_cat[0, i]
@@ -159,11 +153,11 @@ class Fusion(nn.Module):
             a.axis("off")
         plt.savefig(str('feature_maps_lidar_HR.jpg'), bbox_inches='tight')
 
-        x_rgb_features_cat = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
+        x_rgb_features = self.conv_before_fusion_rgb(torch.cat(list(x_rgb_features.values()), dim=1))
 
         processed = []
-        for i in range(x_rgb_features_cat.shape[1]):
-            gray_scale = x_rgb_features_cat[0, i]
+        for i in range(x_rgb_features.shape[1]):
+            gray_scale = x_rgb_features[0, i]
             processed.append(gray_scale.data.cpu().numpy())
         
         fig = plt.figure(figsize=(400, 400))
@@ -173,9 +167,7 @@ class Fusion(nn.Module):
             a.axis("off")
         plt.savefig(str('feature_maps_rgb_HR.jpg'), bbox_inches='tight')
 
-        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features_cat)
-        if self.use_skip:
-            out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
+        out = self.fusion_layer(x_lidar_features_cat, x_rgb_features)
 
         processed = []
         for i in range(out.shape[1]):
@@ -189,29 +181,16 @@ class Fusion(nn.Module):
             a.axis("off")
         plt.savefig(str('feature_maps_fusion_HR.jpg'), bbox_inches='tight')
 
+        out = self.end_conv(torch.cat([out, x_lidar_features_cat], dim=1))
+
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
-
-        processed = []
-        for i in range(out.shape[1]):
-            gray_scale = out[0, i]
-            processed.append(gray_scale.data.cpu().numpy())
-        
-        fig = plt.figure(figsize=(400, 400))
-        for i in range(20):
-            a = fig.add_subplot(5, 4, i+1)
-            imgplot = plt.imshow(processed[i])
-            a.axis("off")
-        plt.savefig(str('class masks_HR.jpg'), bbox_inches='tight')
 
         if self.aux:
             out = [out]
             for i in range(2, 5):
-                out.append(self.aux_heads_lidar["layer{}".format(i)](x_lidar_features["{}".format(i)]))
+                out.append(self.aux_heads["layer{}".format(i)](x_lidar_features["{}".format(i)]))
                 out[-1] = F.softmax(out[-1], dim=1)
-            # for i in range(2, 5):
-            #     out.append(self.aux_heads_rgb["layer{}".format(i)](x_rgb_features["{}".format(i)]))
-            #     out[-1] = F.softmax(out[-1], dim=1)
 
         return out
 
@@ -500,21 +479,30 @@ class SwinFusion(nn.Module):
     #     return flops    
 
 
-class MLP_Swin(nn.Module):
-    """
-    Linear Embedding
-    """
-    def __init__(self, input_dim=2048, embed_dim=768):
-        super().__init__()
-        self.proj = nn.Linear(input_dim, embed_dim)
-
-    def forward(self, x):
-        _, _, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)
-        x = self.proj(x).transpose(1, 2).unflatten(2, (H, W))
-        return x
-
-
 if __name__ == "__main__":
-    model = Fusion(20, True, use_skip=False).cuda()
-    overfit_test(model, 1, (3, 64, 192), (5, 64, 192))
+    import time
+    model = Fusion(20, use_att=False, fusion_scale="main_late").cuda()
+    print(model)
+
+    pytorch_total_params = sum(p.numel()
+                               for p in model.parameters() if p.requires_grad)
+    print("Number of parameters: ", pytorch_total_params / 1000000, "M")
+
+    # for module_name, module in model.named_parameters():
+    #     if "fusion" in module_name:
+    #         print(module_name, module)
+
+    time_train = []
+    for i in range(20):
+        input_3D = torch.rand(2, 5, 64, 512).cuda()
+        input_rgb = torch.rand(2, 3, 64, 512).cuda()
+        model.eval()
+        with torch.no_grad():
+            start_time = time.time()
+            outputs = model(input_3D, input_rgb)
+        torch.cuda.synchronize()  # wait for cuda to finish (cuda is asynchronous!)
+        fwt = time.time() - start_time
+        time_train.append(fwt)
+        print("Forward time per img: %.3f (Mean: %.3f)" % (
+            fwt / 1, sum(time_train) / len(time_train) / 1))
+        time.sleep(0.15)
