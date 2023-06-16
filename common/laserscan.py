@@ -289,9 +289,12 @@ class LaserScan:
         self.proj_remission[proj_y, proj_x] = remission
         self.proj_idx[proj_y, proj_x] = indices
         self.proj_mask = (self.proj_idx > 0).astype(np.int32)
+        self.query_mask = np.isin(self.proj_idx, self.point_idx_camera_fov)
 
-        self.point_idx_rv = self.proj_idx[self.proj_idx != -1]
-        self.point_idx_rv_camera_fov = np.intersect1d(self.point_idx_rv, self.point_idx_camera_fov)
+        # self.point_idx_rv = self.proj_idx[self.proj_idx != -1]
+        # self.point_idx_rv_camera_fov = np.intersect1d(self.point_idx_rv, self.point_idx_camera_fov)
+        # test = self.proj_idx[self.query_mask]
+        
 
         # ! Comment in if visualization is needed
         # self.start_visualization(indices, "All points")

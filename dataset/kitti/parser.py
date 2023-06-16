@@ -213,6 +213,11 @@ class SemanticKitti(Dataset):
     proj_range = torch.from_numpy(scan.proj_range).clone()
     proj_xyz = torch.from_numpy(scan.proj_xyz).clone()
     proj_remission = torch.from_numpy(scan.proj_remission).clone()
+    proj_idx = torch.from_numpy(scan.proj_idx).clone()
+    query_mask = torch.from_numpy(scan.query_mask).clone()
+    # query_idx = np.full((self.sensor_img_H * self.sensor_img_W), -1, dtype=np.int16)
+    # query_idx[:scan.point_idx_rv_camera_fov.shape[0]] = scan.point_idx_rv_camera_fov
+    # query_idx = torch.from_numpy(query_idx).clone()
 
 #     proj_normal = torch.from_numpy(scan.normal_image).clone()
 
@@ -251,10 +256,8 @@ class SemanticKitti(Dataset):
                       proj_labels, 
                       path_seq, 
                       path_name, 
-                      proj_x, proj_y, 
-                      proj_range,  
-                      proj_xyz, 
-                      proj_remission]
+                      proj_idx,
+                      query_mask]
     
     rgb_data = self.img_transform(rgb_data)
     # return
