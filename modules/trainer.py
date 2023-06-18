@@ -17,6 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
+from modules.network.fusion import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -144,6 +145,9 @@ class Trainer():
                 convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
+            elif self.ARCH["train"]["pipeline"] == "fusion":
+                self.model = Fusion(self.parser.get_n_classes())
+                
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -385,7 +389,7 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            in_vol, proj_mask, proj_labels = proj_data[0:3]
+            in_vol, proj_mask, proj_labels, query_mask = proj_data[0:4]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
@@ -394,6 +398,9 @@ class Trainer():
                 proj_labels = proj_labels.cuda()
                 proj_mask = proj_mask.cuda()
                 rgb_data = rgb_data.cuda()
+                query_mask = query_mask.cuda()
+                if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
+                    print("FUCKING SHITTTTTTTTTTTTTT")
             # compute output
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
@@ -401,6 +408,16 @@ class Trainer():
                                                                           proj_mask, 
                                                                           proj_labels,
                                                                           True)
+                elif self.ARCH["train"]["pipeline"] == "fusion":
+                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
+                                                                          query_mask, 
+                                                                          proj_labels,
+                                                                          False)
+                else:
+                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
+                                                                          None, 
+                                                                          proj_labels,
+                                                                          False)
                 out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 

@@ -10,7 +10,8 @@ class RangePreprocess():
             self.aug_prob = aug_prob
     
     def __call__(self, data, mask, label, training=False):
-        data = torch.cat([data, mask.unsqueeze(1)], dim=1)
+        if mask is not None:
+            data = torch.cat([data, mask.unsqueeze(1)], dim=1)
         if not training:
             return data, mask, label.long()
         bs = data.shape[0]

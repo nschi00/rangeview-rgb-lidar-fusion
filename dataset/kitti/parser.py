@@ -86,7 +86,7 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
-    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((256, 768))])
     if self.transform:
       if old_aug:
         self.aug_prob = {"scaling": 0.0,
@@ -253,11 +253,11 @@ class SemanticKitti(Dataset):
     path_name = path_split[-1].replace(".bin", ".label")
     projected_data = [proj, 
                       proj_mask, 
-                      proj_labels, 
+                      proj_labels,
+                      query_mask, 
                       path_seq, 
                       path_name, 
-                      proj_idx,
-                      query_mask]
+                      proj_idx]
     
     rgb_data = self.img_transform(rgb_data)
     # return
