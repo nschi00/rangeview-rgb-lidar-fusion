@@ -21,6 +21,8 @@ import warnings
 import cv2
 from matplotlib import pyplot as plt
 
+from transformers import AutoImageProcessor
+
 
 EXTENSIONS_SCAN = ['.bin']
 EXTENSIONS_LABEL = ['.label']
@@ -107,13 +109,18 @@ class SemanticKitti(Dataset):
     self.gt = gt
     self.only_lidar_front = only_lidar_front
     self.transform = transform
+    self.rgb_resize = rgb_resize
 
-    if rgb_resize:
+    if rgb_resize == "resize":
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W)),
                                        TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    elif rgb_resize == "mask2former":
+      weight = "facebook/mask2former-swin-tiny-cityscapes-semantic"
+      self.img_transform = AutoImageProcessor.from_pretrained(weight)
     else:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240)),
                                        TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
 
     self.rgb_transform_random = TF.RandomHorizontalFlip(p=1.0)
     
@@ -187,7 +194,10 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index] 
-    rgb_data = self.img_transform(Image.open(self.rgb_files[index])) # 3 x H x W
+    if self.rgb_resize == "mask2former":
+      rgb_data = self.img_transform(Image.open(self.rgb_files[index]), return_tensors="pt") # 3 x H x W
+    else:
+      rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
 
     if self.gt:
       label_file = self.label_files[index]
@@ -198,21 +208,21 @@ class SemanticKitti(Dataset):
     rot = False
     drop_points = False
     rotx = False
-    if self.transform:
-        if random.random() > 0.5:
-            # if random.random() > 0.5:
-            #     DA = True
-            if random.random() > 0.5:
-                flip_sign = True
-                rgb_data = self.rgb_transform_random(rgb_data)
-            if random.random() > 0.5:
-                rot = True
-                # print("Rotation around z activated.")
-            # if random.random() > 0.5:
-            #   rotx = np.random.normal(-10, 10, 1)[0]
-            #   rgb_data = TF.functional.rotate(rgb_data, rotx)
-              # print("Rotation around x activated.")
-            drop_points = random.uniform(0, 0.5)
+    # if self.transform:
+    #     if random.random() > 0.5:
+    #         # if random.random() > 0.5:
+    #         #     DA = True
+    #         if random.random() > 0.5:
+    #             flip_sign = True
+    #             rgb_data = self.rgb_transform_random(rgb_data)
+    #         if random.random() > 0.5:
+    #             rot = True
+    #             # print("Rotation around z activated.")
+    #         # if random.random() > 0.5:
+    #         #   rotx = np.random.normal(-10, 10, 1)[0]
+    #         #   rgb_data = TF.functional.rotate(rgb_data, rotx)
+    #           # print("Rotation around x activated.")
+    #         # drop_points = random.uniform(0, 0.5)
 
     if self.gt:
       scan = SemLaserScan(self.color_map,
@@ -343,7 +353,7 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     
-    scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
+    # scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
 
     # return
     return projected_data, rgb_data

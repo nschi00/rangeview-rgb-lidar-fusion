@@ -22,7 +22,8 @@ from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 # pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion_double import Fusion
+from modules.network.Fusion_resnet_swin import Fusion
+from modules.network.Mask2Former_RGB import Backbone_RGB
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
 from tqdm import tqdm
@@ -194,6 +195,10 @@ class Trainer():
                                           use_skip=False)
                 convert_relu_to_softplus(self.model, activation)
                 #self.model = Fusion(self.parser.get_n_classes())
+            elif self.ARCH["train"]["pipeline"] == "rgb":
+                self.model = Backbone_RGB(self.parser.get_n_classes(),
+                                       self.ARCH["train"]["aux_loss"])
+                convert_relu_to_softplus(self.model, activation)
             else:
                 self.model = Mask2FormerBasePrototype(nclasses=self.parser.get_n_classes(),
                                                       aux=self.ARCH["train"]["aux_loss"])
@@ -435,7 +440,11 @@ class Trainer():
                 in_vol = in_vol.cuda()
             if self.gpu:
                 proj_labels = proj_labels.cuda().long()
-            rgb_data = rgb_data.cuda()
+            if self.ARCH["fusion"]["rgb_resize"] != "mask2former":
+                    rgb_data = rgb_data.cuda()
+            else:
+                rgb_data["pixel_values"] = rgb_data["pixel_values"].squeeze(1).cuda()
+                rgb_data["pixel_mask"] = rgb_data["pixel_mask"].squeeze(1).cuda()
             # compute output
             with torch.cuda.amp.autocast():
                 out = self.model(in_vol, rgb_data)
@@ -552,7 +561,11 @@ class Trainer():
                     proj_mask = proj_mask.cuda()
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
-                rgb_data = rgb_data.cuda()
+                if self.ARCH["fusion"]["rgb_resize"] != "mask2former":
+                    rgb_data = rgb_data.cuda()
+                else:
+                    rgb_data["pixel_values"] = rgb_data["pixel_values"].squeeze(1).cuda()
+                    rgb_data["pixel_mask"] = rgb_data["pixel_mask"].squeeze(1).cuda()
                 # compute output
                 output = self.model(in_vol, rgb_data)
 
