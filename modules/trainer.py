@@ -409,10 +409,10 @@ class Trainer():
                                                                           proj_labels,
                                                                           True)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
-                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          query_mask, 
-                                                                          proj_labels,
-                                                                          False)
+                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
+                                                                query_mask, 
+                                                                proj_labels,
+                                                                False)
                 else:
                     in_vol, _, proj_labels= self.range_preprocess(in_vol, 
                                                                           None, 
@@ -528,17 +528,24 @@ class Trainer():
         with torch.no_grad():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
-                in_vol, proj_mask, proj_labels = proj_data[0:3]
+                in_vol, proj_mask, proj_labels, query_mask = proj_data[0:4]
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
+                    query_mask = query_mask.cuda()
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, proj_mask, proj_labels)
-                output = model(in_vol,rgb_data)
+                elif self.ARCH["train"]["pipeline"] == "fusion":
+                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
+                                                                query_mask, 
+                                                                proj_labels,
+                                                                False)
+                with torch.cuda.amp.autocast():
+                    output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
 

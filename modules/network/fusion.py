@@ -26,8 +26,8 @@ class Fusion(nn.Module):
         assert type(depth) == list and len(depth) == 2
         self.lidar_model = ResNet_34(n_classes, aux=True)
         self.n_queries = n_queries
-        rgb_backbone = resnet50(pretrained=False)
-        rgb_backbone.load_state_dict(torch.load('resnet50-19c8e357.pth'))
+        rgb_backbone = resnet50(weights="IMAGENET1K_V2")
+        #rgb_backbone.load_state_dict(torch.load('resnet50-19c8e357.pth'))
         self.rgb_backbone = IntermediateLayerGetter(rgb_backbone, return_layers=return_layers)
         self.fusion = Architechture_1(d_model,
                                       {"self": [2,4,4,8], "cross":[2,4,4,8]}, 
