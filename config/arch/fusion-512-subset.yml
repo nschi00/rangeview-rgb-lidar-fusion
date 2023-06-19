@@ -46,7 +46,7 @@ scheduler:
     cycle_mult : 1.
     max_lr : 0.1
     min_lr : 0.0001
-    gamma : 0.95
+    gamma : 1.0
   OneCycleLR: # Old decay with warmup and cosine annealing 
     max_lr: 0.01 # Equal to optimizer.lr
     total_steps: 1000 # Equal to max_epochs * iterations_per_epoch
@@ -73,7 +73,7 @@ fusion: # only relevant if pipeline == "fusion"
   name_backbone: "resnet50" # "resnet50" or "mask2former"
   stage: "combination" # "enc", "pixel_decoder", "combination"
   only_lidar_front: True
-  rgb_resize: True
+  rgb_resize: False
 
 ################################################################################
 # postproc parameters
