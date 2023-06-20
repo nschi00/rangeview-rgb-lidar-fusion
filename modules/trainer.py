@@ -9,7 +9,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import OneCycleLR, MultiStepLR
 from matplotlib import pyplot as plt
 from common.avgmeter import *
 from torch.utils.tensorboard import SummaryWriter
@@ -76,6 +76,11 @@ class Optim():
             elif name == "OneCycleLR":
                 scheduler_cfg[name]["max_lr"] = optimizer_cfg[optim_name]["lr"]
                 scheduler_cfg[name]["total_steps"] = self.total_iter
+            elif name == "MultiStepLR":
+                milestones = [0.9 * self.total_iter, 0.95 * self.total_iter]
+                gamma = 0.1
+                scheduler_cfg[name]["milestones"] = milestones
+                scheduler_cfg[name]["gamma"] = gamma
             scheduler = eval(name)
             self.scheduler = scheduler(self.optimizer, **scheduler_cfg[name])
         else:
@@ -440,11 +445,7 @@ class Trainer():
                 in_vol = in_vol.cuda()
             if self.gpu:
                 proj_labels = proj_labels.cuda().long()
-            if self.ARCH["fusion"]["rgb_resize"] != "mask2former":
-                    rgb_data = rgb_data.cuda()
-            else:
-                rgb_data["pixel_values"] = rgb_data["pixel_values"].squeeze(1).cuda()
-                rgb_data["pixel_mask"] = rgb_data["pixel_mask"].squeeze(1).cuda()
+            rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
                 out = self.model(in_vol, rgb_data)
@@ -561,11 +562,7 @@ class Trainer():
                     proj_mask = proj_mask.cuda()
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
-                if self.ARCH["fusion"]["rgb_resize"] != "mask2former":
-                    rgb_data = rgb_data.cuda()
-                else:
-                    rgb_data["pixel_values"] = rgb_data["pixel_values"].squeeze(1).cuda()
-                    rgb_data["pixel_mask"] = rgb_data["pixel_mask"].squeeze(1).cuda()
+                rgb_data = rgb_data.cuda()
                 # compute output
                 output = self.model(in_vol, rgb_data)
 

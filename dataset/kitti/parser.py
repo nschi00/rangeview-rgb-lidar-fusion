@@ -111,12 +111,9 @@ class SemanticKitti(Dataset):
     self.transform = transform
     self.rgb_resize = rgb_resize
 
-    if rgb_resize == "resize":
+    if rgb_resize:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W)),
                                        TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    elif rgb_resize == "mask2former":
-      weight = "facebook/mask2former-swin-tiny-cityscapes-semantic"
-      self.img_transform = AutoImageProcessor.from_pretrained(weight)
     else:
       self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((376, 1240)),
                                        TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
@@ -194,10 +191,7 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index] 
-    if self.rgb_resize == "mask2former":
-      rgb_data = self.img_transform(Image.open(self.rgb_files[index]), return_tensors="pt") # 3 x H x W
-    else:
-      rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
+    rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
 
     if self.gt:
       label_file = self.label_files[index]
