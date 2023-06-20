@@ -223,7 +223,7 @@ class Architechture_1(nn.Module):
             x = fnn(x)
         return x
     
-class Architechture_1(nn.Module):
+class Architechture_2(nn.Module):
     def __init__(self, dmodel, nhead: dict, depth: int, dropout, activation="gelu", normalize_before=True) -> None:
         super().__init__()
         assert len(nhead["self"]) == depth
