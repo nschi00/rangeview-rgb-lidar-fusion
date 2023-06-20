@@ -199,9 +199,9 @@ class Trainer():
             w_dict = torch.load(path + "/SENet_valid_best",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-            #             self.optimizer.load_state_dict(w_dict['optimizer'])
-            #             self.epoch = w_dict['epoch'] + 1
-            #             self.scheduler.load_state_dict(w_dict['scheduler'])
+            self.optimizer.load_state_dict(w_dict['optimizer'])
+            self.epoch = w_dict['epoch'] + 1
+            self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
             #             self.info = w_dict['info']
             print("info", w_dict['info'])

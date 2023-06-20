@@ -209,8 +209,8 @@ class Architechture_1(nn.Module):
                                                              dropout,
                                                              activation,
                                                              normalize_before) for i in range(depth["cross"])])
-        self.self_fnn = nn.ModuleList([FFNLayer(dmodel, dmodel*2, dropout, activation, normalize_before) for _ in range(depth["self"])])
-        self.cross_fnn = nn.ModuleList([FFNLayer(dmodel, dmodel*2, dropout, activation, normalize_before) for _ in range(depth["cross"])])
+        self.self_fnn = nn.ModuleList([FFNLayer(dmodel, 2048, dropout, activation, normalize_before) for _ in range(depth["self"])])
+        self.cross_fnn = nn.ModuleList([FFNLayer(dmodel, 2048, dropout, activation, normalize_before) for _ in range(depth["cross"])])
                                                 
         
         
@@ -221,4 +221,34 @@ class Architechture_1(nn.Module):
         for attn, fnn in zip(self.self_attn, self.self_fnn):
             x = attn(x, query_key_padding_mask, query_pos)
             x = fnn(x)
+        return x
+    
+class Architechture_1(nn.Module):
+    def __init__(self, dmodel, nhead: dict, depth: int, dropout, activation="gelu", normalize_before=True) -> None:
+        super().__init__()
+        assert len(nhead["self"]) == depth
+        assert len(nhead["cross"]) == depth
+        assert all(dmodel % np.array(nhead["self"]) == 0)
+        assert all(dmodel % np.array(nhead["cross"]) == 0)
+        self.dmodel = dmodel
+        self.nhead = nhead
+        self.depth = depth
+        self.normalize_before = normalize_before
+        self.self_attn = nn.ModuleList([SelfAttentionLayer(dmodel, 
+                                                           nhead["self"][i], 
+                                                           dropout,
+                                                           activation, 
+                                                           normalize_before) for i in range(depth["self"])])
+        self.cross_attn = nn.ModuleList([CrossAttentionLayer(dmodel,
+                                                             nhead["cross"][i],
+                                                             dropout,
+                                                             activation,
+                                                             normalize_before) for i in range(depth["cross"])])
+        self.fnn = nn.ModuleList([FFNLayer(dmodel, 2048, dropout, activation, normalize_before) for _ in range(depth["self"])])
+        
+    def forward(self, x, kv, pos=None, query_pos=None, query_key_padding_mask=None):
+        for i in range(self.depth):
+            x = self.cross_attn[i](x, kv, query_key_padding_mask, pos, query_pos)
+            x = self.self_attn[i](x, query_key_padding_mask, query_pos)
+            x = self.fnn[i](x)
         return x

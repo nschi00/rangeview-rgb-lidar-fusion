@@ -35,7 +35,7 @@ class Fusion(nn.Module):
                                       dropout=0., normalize_before=True)
         self.feat_2d_red = BasicConv2d(1024, d_model, kernel_size=1, padding=0)
         self.feat_3d_red = BasicConv2d(256, d_model, kernel_size=3, padding=1)
-        self.prediction = BasicConv2d(128, n_classes, kernel_size=1, padding=0)
+        self.prediction = BasicConv2d(d_model, n_classes, kernel_size=1, padding=0)
         self.pos = PositionEmbeddingSine(d_model//2)
         self.query_pos = nn.Embedding(n_queries, d_model)
         print("Fusion model initialized")
