@@ -84,7 +84,6 @@ class SemanticKitti(Dataset):
                learning_map,  # classes to learn (0 to N-1 for xentropy)
                learning_map_inv,    # inverse of previous (recover labels)
                sensor,              # sensor to parse scans from
-               only_lidar_front,
                rgb_resize,
                max_points=150000,   # max number of points present in dataset
                gt=True,
@@ -107,7 +106,6 @@ class SemanticKitti(Dataset):
     self.sensor_fov_down = sensor["fov_down"]
     self.max_points = max_points
     self.gt = gt
-    self.only_lidar_front = only_lidar_front
     self.transform = transform
     self.rgb_resize = rgb_resize
 
@@ -191,6 +189,7 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index] 
+    orig_rgb_data = Image.open(self.rgb_files[index])
     rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
 
     if self.gt:
@@ -209,12 +208,12 @@ class SemanticKitti(Dataset):
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.rgb_transform_random(rgb_data)
-            if random.random() > 0.5:
-                rot = True
+            # if random.random() > 0.5:
+            #     rot = True
     #             # print("Rotation around z activated.")
-            if random.random() > 0.5:
-              rotx = np.random.normal(-10, 10, 1)[0]
-              rgb_data = TF.functional.rotate(rgb_data, rotx)
+            # if random.random() > 0.5:
+            #   rotx = np.random.normal(-10, 10, 1)[0]
+            #   rgb_data = TF.functional.rotate(rgb_data, rotx)
     #           # print("Rotation around x activated.")
             drop_points = random.uniform(0, 0.5)
 
@@ -243,7 +242,7 @@ class SemanticKitti(Dataset):
                        rotx=rotx)
 
     # open and obtain scan
-    scan.open_scan(scan_file, self.only_lidar_front)
+    scan.open_scan(scan_file, orig_rgb_data)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -296,7 +295,7 @@ class SemanticKitti(Dataset):
 
     proj = proj * proj_mask.float()
     
-    if rot and self.only_lidar_front: # Rotation Augmentation for front view
+    if rot: # Rotation Augmentation for front view
       rand_shift = np.random.randint(0, proj.shape[2])
       proj = torch.roll(proj, rand_shift, 2)
       proj_mask = torch.roll(proj_mask, rand_shift, 1)
@@ -331,6 +330,7 @@ class SemanticKitti(Dataset):
     #   cv2.imwrite(name, colormap)
     #   cv2.imwrite("Image.png", (rgb_data*255).permute(1,2,0).numpy())
 
+    mask_front = torch.from_numpy(scan.mask_front).clone()
 
     projected_data = [proj, 
                       proj_mask, 
@@ -345,7 +345,8 @@ class SemanticKitti(Dataset):
                       unproj_xyz, 
                       proj_remission, 
                       unproj_remissions, 
-                      unproj_n_points]
+                      unproj_n_points,
+                      mask_front]
     
     # scan.project_lidar_into_image(rgb_data) ##TODO: Enable if visualization needed
 
@@ -400,8 +401,7 @@ class Parser():
                rgb_resize,
                gt=True,           # get gt?
                shuffle_train=True,
-               subset_ratio=1.0,
-               only_lidar_front=False):  # shuffle training set?
+               subset_ratio=1.0):  # shuffle training set?
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -434,7 +434,6 @@ class Parser():
                                        max_points=max_points,
                                        transform=True,
                                        gt=self.gt,
-                                       only_lidar_front=only_lidar_front,
                                        rgb_resize=rgb_resize)
     
     self.valid_dataset = SemanticKitti(root=self.root,
@@ -446,7 +445,6 @@ class Parser():
                                        sensor=self.sensor,
                                        max_points=max_points,
                                        gt=self.gt,
-                                       only_lidar_front=only_lidar_front,
                                        rgb_resize=rgb_resize)
 
 

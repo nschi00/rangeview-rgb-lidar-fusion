@@ -8,6 +8,9 @@ import random
 from scipy.spatial.transform import Rotation as R
 import cv2
 from PIL import Image, ImageDraw
+from matplotlib import pyplot as plt
+# import vispy
+# from vispy.scene import visuals, SceneCanvass
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -51,6 +54,11 @@ class LaserScan:
         # [H,W] index (-1 is no data)
         self.proj_idx = np.full((self.proj_H, self.proj_W), -1,
                                 dtype=np.int32)
+        
+        # projected index (for each pixel, what I am in the pointcloud)
+        # [H,W] index (-1 is no data)
+        self.proj_idx_front = np.full((self.proj_H, self.proj_W), -1,
+                                dtype=np.int32)
 
         # for each point, where it is in the range image
         self.proj_x = np.zeros((0, 1), dtype=np.int32)  # [m, 1]: x
@@ -67,12 +75,13 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename, only_lidar_front):
+    def open_scan(self, filename, rgb_data):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
         self.reset()
 
+        self.rgb_data = rgb_data
         self.filename = filename
 
         # check filename is string
@@ -93,21 +102,15 @@ class LaserScan:
 
         remissions = scan[:, 3]  # get remission
 
-        self.mask_front = None
-
-        if only_lidar_front:
-            self.fov_hor = [-40, 40]
-            self.fov_vert = [-14, 5]
-            self.mask_front = self.points_basic_filter(points, self.fov_hor, self.fov_vert)
-            points = points[self.mask_front]
-            remissions = remissions[self.mask_front]
-
-        self.points_map_lidar2rgb = points
-
         if self.drop_points is not False:
             self.points_to_drop = np.random.randint(0, len(points)-1,int(len(points)*self.drop_points))
             points = np.delete(points,self.points_to_drop,axis=0)
             remissions = np.delete(remissions,self.points_to_drop)
+
+        fov_hor = [-90, 90]
+        fov_vert = [-90, 90]
+        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
+        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
 
         self.set_points(points, remissions)
 
@@ -159,38 +162,6 @@ class LaserScan:
             self.do_range_projection()
 
 
-#         fov_up = 3.0
-#         fov_down = -25.0
-#         self.fov_up = fov_up
-#         self.fov_down = fov_down
-#         fov_up = fov_up / 180.0 * np.pi  # field of view up in rad
-#         fov_down = fov_down / 180.0 * np.pi  # field of view down in rad
-#         fov = abs(fov_down) + abs(fov_up)
-#         zero_matrix = np.zeros((self.proj_H, self.proj_W))
-#         one_matrix = np.ones((self.proj_H, self.proj_W))
-
-#         self.theta_channel = np.zeros((self.proj_H, self.proj_W))
-#         self.phi_channel = np.zeros((self.proj_H, self.proj_W))
-#         for i in range(self.proj_H):
-#             for j in range(self.proj_W):
-#                 self.theta_channel[i, j] = np.pi * (float(j + 0.5) / self.proj_W * 2 - 1)
-#                 self.phi_channel[i, j] = (1 - float(i + 0.5) / self.proj_H) * fov - abs(fov_down)
-#         self.R_theta = [np.cos(self.theta_channel), -np.sin(self.theta_channel), zero_matrix,
-#                         np.sin(self.theta_channel), np.cos(self.theta_channel), zero_matrix, zero_matrix,
-#                         zero_matrix, one_matrix]
-#         self.R_theta = np.asarray(self.R_theta)
-#         self.R_theta = np.transpose(self.R_theta, (1, 2, 0))
-#         self.R_theta = np.reshape(self.R_theta, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_phi = [np.cos(self.phi_channel), zero_matrix, -np.sin(self.phi_channel), zero_matrix, one_matrix,
-#                       zero_matrix, np.sin(self.phi_channel), zero_matrix, np.cos(self.phi_channel)]
-#         self.R_phi = np.asarray(self.R_phi)
-#         self.R_phi = np.transpose(self.R_phi, (1, 2, 0))
-#         self.R_phi = np.reshape(self.R_phi, [self.proj_H, self.proj_W, 3, 3])
-#         self.R_theta_phi = np.matmul(self.R_theta, self.R_phi)
-
-#         normal_image = self.calculate_normal(self.fill_spherical(self.proj_range))
-#         self.normal_image = normal_image * np.transpose([self.proj_mask, self.proj_mask, self.proj_mask],
-#                                                    [1, 2, 0])
     def do_fd_projection(self):
       """ Project a pointcloud into a spherical projection image.projection.
           Function takes no arguments because it can be also called externally
@@ -267,13 +238,8 @@ class LaserScan:
         pitch = np.arcsin(scan_z / depth)
 
         # get projections in image coords
-        if self.mask_front is not None:
-            fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
-            proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
-            proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
-        else:
-            proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
-            proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
+        proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+        proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
@@ -309,6 +275,17 @@ class LaserScan:
         self.proj_remission[proj_y, proj_x] = remission
         self.proj_idx[proj_y, proj_x] = indices
         self.proj_mask = (self.proj_idx > 0).astype(np.int32)
+
+        point_idx_rv = self.proj_idx[self.proj_idx != -1]
+        point_idx_rv_camera_fov = np.intersect1d(point_idx_rv, self.point_idx_camera_fov)
+        self.mask_front = np.isin(self.proj_idx, point_idx_rv_camera_fov)
+
+        # ! Comment in if visualization is needed
+        # self.start_visualization(indices, "All points")
+        # self.start_visualization(self.point_idx_rv, "Only Range View")
+        # self.start_visualization(self.point_idx_camera_fov, "Only Camera FoV")
+        # self.start_visualization(self.point_idx_rv_camera_fov, "Combination of RV and Camera FoV")
+        # print("End")
 
     def fill_spherical(self, range_image):
         # fill in spherical image for calculating normal vector
@@ -357,7 +334,7 @@ class LaserScan:
         normal_vector_camera[:, :, 2] = normal_vector[:, :, 0]
         return normal_vector_camera
     
-    def project_lidar_into_image(self, rgb):
+    def get_lidar_points_in_image_plane(self, points, mask_fov):
         self.filename = self.filename.rsplit('/', 2)[0] + "/calib.txt"
 
         # Open the file for reading
@@ -379,30 +356,26 @@ class LaserScan:
                 numbers_str = line.split(':')[1].strip()  # Extract the numbers after the colon and remove whitespace
                 numbers = list(map(float, numbers_str.split()))  # Convert the numbers to a list of floats
 
-                # Reshape the list into a 3x4 matrix
-                Tr = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
-        
+                # Reshape the list into a 4x4 matrix
+                Tr = np.eye(4)
+                Tr[0:3, 0:4] = np.array([numbers[i:i+4] for i in range(0, len(numbers), 4)])
+
         # Transform LiDAR to left camera coordinates and projection to pixel space as described in KITTI Odometry Readme
-        hom_points = np.ones((np.shape(self.points_map_lidar2rgb)[0], 4))
-        hom_points[:, 0:3] = self.points_map_lidar2rgb
-        trans_points = (Tr @ hom_points.T).T
-        hom_points[:, 0:3] = trans_points
-        proj_points_im = (P2 @ hom_points.T).T
+        hom_points = np.ones((np.shape(points)[0], 4))
+        hom_points[:, 0:3] = points
+        proj_points_im = (P2 @ Tr @ hom_points.T).T
         proj_points_im[:, 0] /= proj_points_im[:, 2]
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]
 
-        rgb_image = Image.fromarray(np.transpose((rgb.numpy()*255).astype('uint8'), (1, 2, 0)))
-        image_with_points = rgb_image.copy()
+        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_data._size[0])
+        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_data._size[1])
 
-        draw = ImageDraw.Draw(image_with_points)
+        combined_condition = condition_col1 & condition_col2 & mask_fov
 
-        # Draw the points on the image
-        for point in proj_points_im:
-            draw.point(point, fill="red")
+        indices = np.nonzero(combined_condition)[0]
 
-        # Save the modified image with the points
-        image_with_points.save("image_with_points.jpg")
+        return indices
 
     ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
     def hv_in_range(self, m, n, fov, fov_type='h'):
@@ -437,11 +410,94 @@ class LaserScan:
 
         return combined
 
-    def extract_points(self):
-        # filter in range points based on fov, x,y,z range setting
-        combined = self.points_basic_filter(self.points)
-        points = self.points[combined]
-        label = self.sem_label[combined]
+    # def get_mpl_colormap(self, cmap_name):
+    #     cmap = plt.get_cmap(cmap_name)
+
+    #     # Initialize the matplotlib color map
+    #     sm = plt.cm.ScalarMappable(cmap=cmap)
+
+    #     # Obtain linear color range
+    #     color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+
+    #     return color_range.reshape(256, 3).astype(np.float32) / 255.0
+
+    # def start_visualization(self, indices, title):
+    #     self.action = "no"  # no, next, back, quit are the possibilities
+    #     self.indices = indices
+    #     self.viz_title = title
+
+    #     # new canvas prepared for visualizing data
+    #     self.canvas = SceneCanvas(keys='interactive', show=True)
+    #     # interface (n next, b back, q quit, very simple)
+    #     self.canvas.events.key_press.connect(self.key_press)
+    #     self.canvas.events.draw.connect(self.draw)
+    #     # grid
+    #     self.grid = self.canvas.central_widget.add_grid()
+
+    #     # laserscan part
+    #     self.scan_view = vispy.scene.widgets.ViewBox(
+    #         border_color='white', parent=self.canvas.scene)
+    #     self.grid.add_widget(self.scan_view, 0, 0)
+    #     self.scan_vis = visuals.Markers()
+    #     self.scan_view.camera = 'turntable'
+    #     self.scan_view.add(self.scan_vis)
+    #     visuals.XYZAxis(parent=self.scan_view.scene)
+
+    #     self.update_scan()
+    #     self.run()
+
+    # def update_scan(self):
+    #     # then change names
+    #     title = self.viz_title
+    #     self.canvas.title = title
+
+    #     # plot scan
+    #     power = 16
+    #     # print()
+    #     range_data = np.copy(self.unproj_range[self.indices])
+    #     # range_data = np.copy(self.unproj_range)
+    #     # print(range_data.max(), range_data.min())
+    #     range_data = range_data**(1 / power)
+    #     # print(range_data.max(), range_data.min())
+    #     viridis_range = ((range_data - range_data.min()) /
+    #                     (range_data.max() - range_data.min()) *
+    #                     255).astype(np.uint8)
+    #     viridis_map = self.get_mpl_colormap("viridis")
+    #     viridis_colors = viridis_map[viridis_range]
+    #     self.scan_vis.set_data(self.points[self.indices],
+    #                             face_color=viridis_colors[..., ::-1],
+    #                             edge_color=viridis_colors[..., ::-1],
+    #                             size=1)
+
+    #   # interface
+    # def key_press(self, event):
+    #     self.canvas.events.key_press.block()
+    #     if event.key == 'N':
+    #         self.offset += 1
+    #         if self.offset >= self.total:
+    #             self.offset = 0
+    #         self.update_scan()
+    #     elif event.key == 'B':
+    #         self.offset -= 1
+    #         if self.offset < 0:
+    #             self.offset = self.total - 1
+    #         self.update_scan()
+    #     elif event.key == 'Q' or event.key == 'Escape':
+    #         self.destroy()
+
+    # def draw(self, event):
+    #     if self.canvas.events.key_press.blocked():
+    #         self.canvas.events.key_press.unblock()
+
+    # def destroy(self):
+    #     # destroy the visualization
+    #     self.canvas.close()
+    #     if self.images:
+    #         self.img_canvas.close()
+    #     vispy.app.quit()
+
+    # def run(self):
+    #     vispy.app.run()
 
 
 class SemLaserScan(LaserScan):
@@ -518,8 +574,6 @@ class SemLaserScan(LaserScan):
         # if all goes well, open label
         label = np.fromfile(filename, dtype=np.int32)
         label = label.reshape((-1))
-
-        label = label[self.mask_front] if self.mask_front is not None else label
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)

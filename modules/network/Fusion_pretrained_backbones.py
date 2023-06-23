@@ -12,6 +12,7 @@ from ResNet import BasicBlock, BasicConv2d, conv1x1, ResNet_34
 from Mask2Former_RGB import Backbone_RGB
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 from typing import List, Optional, Tuple
 
@@ -44,6 +45,8 @@ class Fusion(nn.Module):
         self.Fusion_num_heads=[8, 8]
         self.Fusion_depths = [2, 2]
 
+        self.vis_att = False
+
 
         """RGB Backbone"""
         self.rgb_backbone = Backbone_RGB(nclasses)
@@ -59,18 +62,22 @@ class Fusion(nn.Module):
 
         self.rgb_backbone.backbone.class_predictor = nn.Linear(256, inplanes)
 
+        self.bn_rgb = nn.BatchNorm2d(inplanes)
+
 
         """Lidar Backbone"""
         self.cenet = ResNet_34(nclasses, True)
         w_dict = torch.load(
-            "logs/lidar_front_25_baseline_cosine_192_flipdroprotDA_aux_bs4/SENet_valid_best",
+            "logs/baseline_25/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 
         for param in self.cenet.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
         self.cenet.semantic_output = nn.Conv2d(128, 128, 1)
+
+        self.bn_lidar = nn.BatchNorm2d(inplanes)
 
         """Fusion"""
         upscale = 4
@@ -81,6 +88,8 @@ class Fusion(nn.Module):
                     window_size=window_size, embed_dim=128, Fusion_num_heads=self.Fusion_num_heads,
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
+        
+        self.bn_fusion = nn.BatchNorm2d(inplanes)
 
         """Final layers"""
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
@@ -90,77 +99,82 @@ class Fusion(nn.Module):
             for i in range(len(self.Fusion_depths)):
                 self.aux_heads["layer{}".format(i)] = nn.Conv2d(128*2, nclasses, 1)
 
-    def forward(self, lidar, rgb):
-
+    def forward(self, lidar, rgb, mask_front):
+        bs = lidar.shape[0]
         """Pre-trained Feature Extraction"""
         x_lidar = self.cenet(lidar, rgb)[0]
-        x_rgb = self.rgb_backbone(lidar, rgb)
+        x_lidar = self.bn_lidar(x_lidar)
+        x_lidar_fusion = self.bbox2(x_lidar * mask_front.unsqueeze(dim=1))
+        x_lidar_fusion_size = x_lidar_fusion.shape[2:]
+        x_lidar_fusion = F.interpolate(self.bbox2(x_lidar * mask_front.unsqueeze(dim=1)),
+                                       size=[64, 192], mode='bilinear', align_corners=False)
+
+        if self.vis_att:
+            processed = []
+            for i in range(x_lidar.shape[1]):
+                gray_scale = x_lidar[0, i]
+                processed.append(gray_scale.data.cpu().numpy())
+            
+            for i in range(20):
+                plt.imsave("Lidar Features {}.png".format(i), processed[i])
+
+        x_rgb = self.rgb_backbone(x_lidar_fusion, rgb)
+        x_rgb = self.bn_rgb(x_rgb)
+
+        if self.vis_att:
+            processed = []
+            for i in range(x_rgb.shape[1]):
+                gray_scale = x_rgb[0, i]
+                processed.append(gray_scale.data.cpu().numpy())
+            
+            for i in range(20):
+                plt.imsave("RGB Features {}.png".format(i), processed[i])
 
         """Fusion Module"""
-        out, x_aux = self.fusion(x_lidar, x_rgb)
+        fusion_out, _ = self.fusion(x_lidar_fusion, x_rgb)
+        fusion_out = F.interpolate(fusion_out, size=x_lidar_fusion_size, mode='bilinear', align_corners=False)
+        x_fusion = torch.zeros_like(x_lidar)
+        for i in range(bs):
+            ymin, ymax, xmin, xmax = self.indices[i]
+            x_fusion[i, :, ymin:ymax+1, xmin:xmax+1] = fusion_out[i]
+        x_fusion = self.bn_fusion(x_fusion)
+        del x_lidar_fusion, fusion_out
 
-        out = self.semantic_output(out)
+        if self.vis_att:
+            processed = []
+            for i in range(x_rgb.shape[1]):
+                gray_scale = out[0, i]
+                processed.append(gray_scale.data.cpu().numpy())
+            
+            for i in range(20):
+                plt.imsave("Fusion Features {}.png".format(i), processed[i])
+
+        mask_fusion = mask_front.unsqueeze(dim=1).repeat(1, x_lidar.shape[1], 1, 1)
+        x_lidar[mask_fusion] = x_fusion[mask_fusion]
+        out = self.semantic_output(x_lidar)
+        del x_lidar
         out = F.softmax(out, dim=1)
 
-        if self.aux:
-            out = [out]
-            for i in range(len(self.Fusion_num_heads)):
-                out.append(self.aux_heads["layer{}".format(i)](x_aux[i]))
-                out[-1] = F.softmax(out[-1], dim=1)
+        # if self.aux:
+        #     out = [out]
+        #     for i in range(len(self.Fusion_num_heads)):
+        #         out.append(self.aux_heads["layer{}".format(i)](x_aux[i]))
+        #         out[-1] = F.softmax(out[-1], dim=1)
 
         return out
     
-    def post_process_semantic_segmentation(
-        self, outputs, target_sizes: Optional[List[Tuple[int, int]]] = None
-    ) -> "torch.Tensor":
-        """
-        Converts the output of [`Mask2FormerForUniversalSegmentation`] into semantic segmentation maps. Only supports
-        PyTorch.
-
-        Args:
-            outputs ([`Mask2FormerForUniversalSegmentation`]):
-                Raw outputs of the model.
-            target_sizes (`List[Tuple[int, int]]`, *optional*):
-                List of length (batch_size), where each list item (`Tuple[int, int]]`) corresponds to the requested
-                final size (height, width) of each prediction. If left to None, predictions will not be resized.
-        Returns:
-            `List[torch.Tensor]`:
-                A list of length `batch_size`, where each item is a semantic segmentation map of shape (height, width)
-                corresponding to the target_sizes entry (if `target_sizes` is specified). Each entry of each
-                `torch.Tensor` correspond to a semantic class id.
-        """
-        class_queries_logits = outputs.class_queries_logits  # [batch_size, num_queries, num_classes+1]
-        masks_queries_logits = outputs.masks_queries_logits  # [batch_size, num_queries, height, width]
-
-        # Scale back to preprocessed image size - (384, 384) for all models
-        masks_queries_logits = torch.nn.functional.interpolate(
-            masks_queries_logits, size=(384, 384), mode="bilinear", align_corners=False
-        )
-
-        masks_classes = class_queries_logits.softmax(dim=-1)
-        masks_probs = masks_queries_logits.sigmoid()  # [batch_size, num_queries, height, width]
-
-        # Semantic segmentation logits of shape (batch_size, num_classes, height, width)
-        segmentation = torch.einsum("bqc, bqhw -> bchw", masks_classes, masks_probs)
-        batch_size = class_queries_logits.shape[0]
-
-        # Resize logits and compute semantic segmentation maps
-        if target_sizes is not None:
-            if batch_size != len(target_sizes):
-                raise ValueError(
-                    "Make sure that you pass in as many target sizes as the batch dimension of the logits"
-                )
-
-            semantic_segmentation = []
-            for idx in range(batch_size):
-                resized_logits = torch.nn.functional.interpolate(
-                    segmentation[idx].unsqueeze(dim=0), size=target_sizes[idx], mode="bilinear", align_corners=False
-                )
-                semantic_segmentation.append(resized_logits[0])
-        else:
-            semantic_segmentation = [semantic_segmentation[i] for i in range(segmentation.shape[0])]
-
-        return torch.stack(semantic_segmentation, dim=0)
+    def bbox2(self, batch):
+        out = []
+        self.indices = []
+        for i in range(batch.shape[0]):
+            rows = torch.any(batch[i, 0], dim=1) #TODO: Check if first channel is enough for that
+            cols = torch.any(batch[i, 0], dim=0)
+            ymin, ymax = torch.where(rows)[0][[0, -1]]
+            xmin, xmax = torch.where(cols)[0][[0, -1]]
+            out.append(batch[i, :, ymin:ymax+1, xmin:xmax+1].unsqueeze(0))
+            self.indices.append([ymin, ymax, xmin, xmax])
+        out = torch.cat(out, dim=0)
+        return out
 
 
 class SwinFusion(nn.Module):
@@ -226,6 +240,7 @@ class SwinFusion(nn.Module):
         num_patches = self.patch_embed.num_patches
         # num_patches = 32768  ###TODO: change to image size multiplication
         num_patches = 12288
+        # num_patches = 4830
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 

@@ -161,7 +161,6 @@ class Trainer():
                              gt=True,
                              shuffle_train=True,
                              subset_ratio=self.ARCH["train"]["subset_ratio"],
-                             only_lidar_front=self.ARCH["fusion"]["only_lidar_front"],
                              rgb_resize=self.ARCH["fusion"]["rgb_resize"])
 
         # weights for loss (and bias)
@@ -425,6 +424,7 @@ class Trainer():
         acc = AverageMeter()
         iou = AverageMeter()
         bd = AverageMeter()
+        iou_front = AverageMeter()
         learning_rate = AverageMeter()
         attention_lr = AverageMeter()
 
@@ -438,16 +438,20 @@ class Trainer():
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
             in_vol, proj_mask, proj_labels = proj_data[0:3]
+            mask_front = proj_data[-1]
+            proj_labels_front = proj_labels * mask_front
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
                 in_vol = in_vol.cuda()
             if self.gpu:
                 proj_labels = proj_labels.cuda().long()
+                proj_labels_front = proj_labels_front.cuda().long()
+                mask_front = mask_front.cuda()
             rgb_data = rgb_data.cuda()
             # compute output
             with torch.cuda.amp.autocast():
-                out = self.model(in_vol, rgb_data)
+                out = self.model(in_vol, rgb_data, mask_front)
                 lamda = self.ARCH["train"]["lamda"]
                 if type(out) is not list:  # IN CASE OF SINGLE OUTPUT
                     out = [out]
@@ -476,10 +480,15 @@ class Trainer():
                 evaluator.addBatch(argmax, proj_labels)
                 accuracy = evaluator.getacc()
                 jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
+                #! IoU for camera FoV
+                evaluator.reset()
+                evaluator.addBatch(argmax*mask_front, proj_labels_front)
+                jaccard_front, class_jaccard = evaluator.getIoUMissingClass()
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
+            iou_front.update(jaccard_front.item(), in_vol.size(0))
             bd.update(bdlosss.item(), in_vol.size(0))
 
             # measure elapsed time
@@ -515,10 +524,11 @@ class Trainer():
                       'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
                       'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
                       'acc {acc.val:.3f} ({acc.avg:.3f}) | '
-                      'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
+                      'IoU {iou.val:.3f} ({iou.avg:.3f}) | '
+                      'IoU front {iou_front.val:.3f} ({iou_front.avg:.3f}) | [{estim}]'.format(
                           epoch, i, len(train_loader), batch_time=self.batch_time_t,
                           data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
-                          att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
+                          att_lr=att_lr, iou_front=iou_front, estim=self.calculate_estimate(epoch, i)))
 
                 save_to_log(self.log, 'log.txt', 'Lr: {lr:.3e} | '
                             'Att_lr: {att_lr:.0e} |'
@@ -528,10 +538,11 @@ class Trainer():
                             'Loss {loss.val:.4f} ({loss.avg:.4f}) | '
                             'Bd {bd.val:.4f} ({bd.avg:.4f}) | '
                             'acc {acc.val:.3f} ({acc.avg:.3f}) | '
-                            'IoU {iou.val:.3f} ({iou.avg:.3f}) | [{estim}]'.format(
+                            'IoU {iou.val:.3f} ({iou.avg:.3f}) | '
+                            'IoU front {iou_front.val:.3f} ({iou_front.avg:.3f}) | [{estim}]'.format(
                                 epoch, i, len(train_loader), batch_time=self.batch_time_t,
                                 data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
-                                att_lr=att_lr, estim=self.calculate_estimate(epoch, i)))
+                                att_lr=att_lr, iou_front=iou_front, estim=self.calculate_estimate(epoch, i)))
 
 
         return acc.avg, iou.avg, losses.avg
@@ -542,6 +553,7 @@ class Trainer():
         wces = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
+        iou_front = AverageMeter()
         rand_imgs = []
 
         # switch to evaluate mode
@@ -556,14 +568,18 @@ class Trainer():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
                 in_vol, proj_mask, proj_labels = proj_data[0:3]
+                mask_front = proj_data[-1]
+                proj_labels_front = proj_labels * mask_front
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
+                    proj_labels_front = proj_labels_front.cuda().long()
+                    mask_front = mask_front.cuda()
                 rgb_data = rgb_data.cuda()
                 # compute output
-                output = self.model(in_vol, rgb_data)
+                output = self.model(in_vol, rgb_data, mask_front)
 
                 if type(output) is list:
                     output = output[0]
@@ -600,8 +616,13 @@ class Trainer():
 
             accuracy = evaluator.getacc()
             jaccard, class_jaccard = evaluator.getIoUMissingClass()  ###TODO: Investigate change to getIoU
+            #! IoU for camera FoV
+            evaluator.reset()
+            evaluator.addBatch(argmax*mask_front, proj_labels_front)
+            jaccard_front, class_jaccard_front = evaluator.getIoUMissingClass()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
+            iou_front.update(jaccard_front.item(), in_vol.size(0))
 
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
@@ -609,11 +630,12 @@ class Trainer():
                   'Jaccard avg {jac.avg:.4f}\n'
                   'WCE avg {wces.avg:.4f}\n'
                   'Acc avg {acc.avg:.3f}\n'
-                  'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
+                  'IoU avg {iou.avg:.3f}\n'
+                  'IoU front avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
                                                  loss=losses,
                                                  jac=jaccs,
                                                  wces=wces,
-                                                 acc=acc, iou=iou))
+                                                 acc=acc, iou=iou, iou_front=iou_front))
 
             save_to_log(self.log, 'log.txt', 'Validation set:\n'
                                              'Time avg per batch {batch_time.avg:.3f}\n'
@@ -621,11 +643,12 @@ class Trainer():
                                              'Jaccard avg {jac.avg:.4f}\n'
                                              'WCE avg {wces.avg:.4f}\n'
                                              'Acc avg {acc.avg:.3f}\n'
-                                             'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
+                                             'IoU avg {iou.avg:.3f}\n'
+                                             'IoU front avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
                                                                             loss=losses,
                                                                             jac=jaccs,
                                                                             wces=wces,
-                                                                            acc=acc, iou=iou))
+                                                                            acc=acc, iou=iou, iou_front=iou_front))
             # print also classwise
             for i, jacc in enumerate(class_jaccard):
                 print('IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
@@ -633,5 +656,12 @@ class Trainer():
                 save_to_log(self.log, 'log.txt', 'IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
                     i=i, class_str=class_func(i), jacc=jacc))
                 self.info["valid_classes/" + class_func(i)] = jacc
+
+            for i, jacc in enumerate(class_jaccard_front):
+                print('Front IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
+                    i=i, class_str=class_func(i), jacc=jacc))
+                save_to_log(self.log, 'log.txt', 'Front IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
+                    i=i, class_str=class_func(i), jacc=jacc))
+                self.info["valid_classes_front/" + class_func(i)] = jacc
 
         return acc.avg, iou.avg, losses.avg, rand_imgs
