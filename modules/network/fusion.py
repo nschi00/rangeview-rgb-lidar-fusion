@@ -21,7 +21,7 @@ return_layers = {"layer3": "out"}
 
 
 class Fusion(nn.Module):
-    def __init__(self, n_classes, d_model=256, depth=[4,4], n_queries=6500) -> None:
+    def __init__(self, n_classes, d_model=128, depth=[4,4], n_queries=6500) -> None:
         super().__init__()
         assert type(depth) == list and len(depth) == 2
         self.lidar_model = ResNet_34(n_classes, aux=True)
@@ -30,7 +30,7 @@ class Fusion(nn.Module):
         #rgb_backbone.load_state_dict(torch.load('resnet50-19c8e357.pth'))
         self.rgb_backbone = IntermediateLayerGetter(rgb_backbone, return_layers=return_layers)
         self.fusion = Architechture_1(d_model,
-                                      {"self": [4,8,8,16], "cross":[4,8,8,16]}, 
+                                      {"self": [2,4,4,8], "cross":[2,4,4,8]}, 
                                       {"self": depth[0], "cross": depth[1]}, 
                                       dropout=0., normalize_before=True)
         self.feat_2d_red = BasicConv2d(1024, d_model, kernel_size=1, padding=0)

@@ -415,9 +415,9 @@ class Trainer():
                                                                 False)
                 else:
                     in_vol, _, proj_labels= self.range_preprocess(in_vol, 
-                                                                          None, 
-                                                                          proj_labels,
-                                                                          False)
+                                                                None, 
+                                                                proj_labels,
+                                                                False)
                 out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
