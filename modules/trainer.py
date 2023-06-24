@@ -121,7 +121,7 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        self.range_preprocess = RangePreprocess()
+        self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -193,7 +193,8 @@ class Trainer():
                                         self.model, 
                                         self.ARCH, 
                                         self.parser.get_train_size())
-
+        print(self.optimizer)
+        print(self.scheduler)
         if self.path is not None:
             torch.nn.Module.dump_patches = True
             w_dict = torch.load(path + "/SENet_valid_best",
@@ -410,9 +411,9 @@ class Trainer():
                                                                           True)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
                     in_vol, _, proj_labels= self.range_preprocess(in_vol, 
-                                                                query_mask, 
+                                                                [proj_mask, query_mask], 
                                                                 proj_labels,
-                                                                False)
+                                                                True)
                 else:
                     in_vol, _, proj_labels= self.range_preprocess(in_vol, 
                                                                 None, 
@@ -543,7 +544,7 @@ class Trainer():
                     in_vol, _, proj_labels= self.range_preprocess(in_vol, 
                                                                 query_mask, 
                                                                 proj_labels,
-                                                                False)
+                                                                True)
                 with torch.cuda.amp.autocast():
                     output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
