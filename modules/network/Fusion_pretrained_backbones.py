@@ -73,7 +73,7 @@ class Fusion(nn.Module):
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 
         for param in self.cenet.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
         self.cenet.semantic_output = nn.Conv2d(128, 128, 1)
 
@@ -104,50 +104,58 @@ class Fusion(nn.Module):
         """Pre-trained Feature Extraction"""
         x_lidar = self.cenet(lidar, rgb)[0]
         x_lidar = self.bn_lidar(x_lidar)
-        x_lidar_fusion = self.bbox2(x_lidar * mask_front.unsqueeze(dim=1))
-        x_lidar_fusion_size = x_lidar_fusion.shape[2:]
-        x_lidar_fusion = F.interpolate(self.bbox2(x_lidar * mask_front.unsqueeze(dim=1)),
-                                       size=[64, 192], mode='bilinear', align_corners=False)
+        x_lidar_fusion_list = self.bbox2(x_lidar * mask_front.unsqueeze(dim=1))
 
-        if self.vis_att:
-            processed = []
-            for i in range(x_lidar.shape[1]):
-                gray_scale = x_lidar[0, i]
-                processed.append(gray_scale.data.cpu().numpy())
+        x_lidar_fusion = []
+        x_lidar_fusion_size = []
+
+        for i in range(bs):
+            x_lidar_fusion_size.append(x_lidar_fusion_list[i].shape[2:])
+            x_lidar_fusion.append(F.interpolate(x_lidar_fusion_list[i],
+                                       size=[64, 192], mode='bilinear', align_corners=False))
+        x_lidar_fusion = torch.cat(x_lidar_fusion, dim=0)
+
+        # if self.vis_att:
+        #     processed = []
+        #     for i in range(x_lidar.shape[1]):
+        #         gray_scale = x_lidar[0, i]
+        #         processed.append(gray_scale.data.cpu().numpy())
             
-            for i in range(20):
-                plt.imsave("Lidar Features {}.png".format(i), processed[i])
+        #     for i in range(20):
+        #         plt.imsave("Lidar Features {}.png".format(i), processed[i])
 
         x_rgb = self.rgb_backbone(x_lidar_fusion, rgb)
         x_rgb = self.bn_rgb(x_rgb)
 
-        if self.vis_att:
-            processed = []
-            for i in range(x_rgb.shape[1]):
-                gray_scale = x_rgb[0, i]
-                processed.append(gray_scale.data.cpu().numpy())
+        # if self.vis_att:
+        #     processed = []
+        #     for i in range(x_rgb.shape[1]):
+        #         gray_scale = x_rgb[0, i]
+        #         processed.append(gray_scale.data.cpu().numpy())
             
-            for i in range(20):
-                plt.imsave("RGB Features {}.png".format(i), processed[i])
+        #     for i in range(20):
+        #         plt.imsave("RGB Features {}.png".format(i), processed[i])
 
         """Fusion Module"""
         fusion_out, _ = self.fusion(x_lidar_fusion, x_rgb)
-        fusion_out = F.interpolate(fusion_out, size=x_lidar_fusion_size, mode='bilinear', align_corners=False)
+
         x_fusion = torch.zeros_like(x_lidar)
+
         for i in range(bs):
+            current_fusion_out = F.interpolate(fusion_out[i].unsqueeze(0), size=x_lidar_fusion_size[i], mode='bilinear', align_corners=False)
             ymin, ymax, xmin, xmax = self.indices[i]
-            x_fusion[i, :, ymin:ymax+1, xmin:xmax+1] = fusion_out[i]
+            x_fusion[i, :, ymin:ymax+1, xmin:xmax+1] = current_fusion_out
         x_fusion = self.bn_fusion(x_fusion)
         del x_lidar_fusion, fusion_out
 
-        if self.vis_att:
-            processed = []
-            for i in range(x_rgb.shape[1]):
-                gray_scale = out[0, i]
-                processed.append(gray_scale.data.cpu().numpy())
+        # if self.vis_att:
+        #     processed = []
+        #     for i in range(x_rgb.shape[1]):
+        #         gray_scale = out[0, i]
+        #         processed.append(gray_scale.data.cpu().numpy())
             
-            for i in range(20):
-                plt.imsave("Fusion Features {}.png".format(i), processed[i])
+        #     for i in range(20):
+        #         plt.imsave("Fusion Features {}.png".format(i), processed[i])
 
         mask_fusion = mask_front.unsqueeze(dim=1).repeat(1, x_lidar.shape[1], 1, 1)
         x_lidar[mask_fusion] = x_fusion[mask_fusion]
@@ -173,7 +181,7 @@ class Fusion(nn.Module):
             xmin, xmax = torch.where(cols)[0][[0, -1]]
             out.append(batch[i, :, ymin:ymax+1, xmin:xmax+1].unsqueeze(0))
             self.indices.append([ymin, ymax, xmin, xmax])
-        out = torch.cat(out, dim=0)
+        # out = torch.cat(out, dim=0)
         return out
 
 

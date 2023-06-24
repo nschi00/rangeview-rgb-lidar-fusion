@@ -137,11 +137,15 @@ class Trainer():
         self.info = {"train_loss": 0,
                      "train_acc": 0,
                      "train_iou": 0,
+                     "train_iou_front": 0,
                      "valid_loss": 0,
                      "valid_acc": 0,
                      "valid_iou": 0,
+                     "valid_iou_front": 0,
                      "best_train_iou": 0,
-                     "best_val_iou": 0}
+                     "best_train_iou_front": 0,
+                     "best_val_iou": 0,
+                     "best_val_iou_front": 0}
 
 
         # get the data
@@ -338,7 +342,7 @@ class Trainer():
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
         if self.path is not None:  # *validate model if loaded from checkpoint
-            acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+            acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                      evaluator=self.evaluator,
                                                      class_func=self.parser.get_xentropy_class_string,
                                                      color_fn=self.parser.to_color,
@@ -348,7 +352,7 @@ class Trainer():
         for epoch in range(self.epoch, self.ARCH["optimizer"]["max_epochs"]):
             # train for 1 epoch
 
-            acc, iou, loss = self.train_epoch(train_loader=self.parser.get_train_set(),
+            acc, iou, loss, iou_front = self.train_epoch(train_loader=self.parser.get_train_set(),
                                               epoch=epoch,
                                               evaluator=self.evaluator,
                                               color_fn=self.parser.to_color,
@@ -359,6 +363,7 @@ class Trainer():
             self.info["train_loss"] = loss
             self.info["train_acc"] = acc
             self.info["train_iou"] = iou
+            self.info["train_iou_front"] = iou_front
             self.info["lr"] = self.optim.get_lr()["rest"]
             self.info["att_lr"] = self.optim.get_lr()["fb"]
 
@@ -377,10 +382,16 @@ class Trainer():
                 self.info['best_train_iou'] = self.info['train_iou']
                 save_checkpoint(state, self.log, suffix="_train_best")
 
+            if self.info['train_iou_front'] > self.info['best_train_iou_front']:
+                save_to_log(self.log, 'log.txt', "Best mean iou front in training set so far, save model!")
+                print("Best mean iou front in training set so far, save model!")
+                self.info['best_train_iou_front'] = self.info['train_iou_front']
+                save_checkpoint(state, self.log, suffix="_train_front_best")
+
             if epoch % self.ARCH["train"]["report_epoch"] == 0:
                 # evaluate on validation set
                 print("*" * 80)
-                acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+                acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                          evaluator=self.evaluator,
                                                          class_func=self.parser.get_xentropy_class_string,
                                                          color_fn=self.parser.to_color,
@@ -390,6 +401,7 @@ class Trainer():
                 self.info["valid_loss"] = loss
                 self.info["valid_acc"] = acc
                 self.info["valid_iou"] = iou
+                self.info["valid_iou_front"] = iou_front
 
             # remember best iou and save checkpoint
             if self.info['valid_iou'] > self.info['best_val_iou']:
@@ -400,6 +412,15 @@ class Trainer():
 
                 # save the weights!
                 save_checkpoint(state, self.log, suffix="_valid_best")
+
+            if self.info['valid_iou_front'] > self.info['best_val_iou_front']:
+                save_to_log(self.log, 'log.txt', "Best mean iou front in validation so far, save model!")
+                print("Best mean iou front in validation so far, save model!")
+                print("*" * 80)
+                self.info['best_val_iou_front'] = self.info['valid_iou_front']
+
+                # save the weights!
+                save_checkpoint(state, self.log, suffix="_valid_front_best")
 
             print("*" * 80)
 
@@ -545,7 +566,7 @@ class Trainer():
                                 att_lr=att_lr, iou_front=iou_front, estim=self.calculate_estimate(epoch, i)))
 
 
-        return acc.avg, iou.avg, losses.avg
+        return acc.avg, iou.avg, losses.avg, iou_front.avg
 
     def validate(self, val_loader, evaluator, class_func, color_fn, save_scans):
         losses = AverageMeter()
@@ -664,4 +685,4 @@ class Trainer():
                     i=i, class_str=class_func(i), jacc=jacc))
                 self.info["valid_classes_front/" + class_func(i)] = jacc
 
-        return acc.avg, iou.avg, losses.avg, rand_imgs
+        return acc.avg, iou.avg, losses.avg, rand_imgs, iou_front.avg
