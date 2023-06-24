@@ -339,11 +339,14 @@ class Trainer():
                 print("Ignoring class ", i, " in IoU evaluation")
         self.evaluator = iouEval(self.parser.get_n_classes(),
                                  self.device, self.ignore_class)
+        self.front_evaluator = iouEval(self.parser.get_n_classes(),
+                                 self.device, self.ignore_class)
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
         if self.path is not None:  # *validate model if loaded from checkpoint
             acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                      evaluator=self.evaluator,
+                                                     front_evaluator=self.front_evaluator,
                                                      class_func=self.parser.get_xentropy_class_string,
                                                      color_fn=self.parser.to_color,
                                                      save_scans=self.ARCH["train"]["save_scans"])
@@ -355,6 +358,7 @@ class Trainer():
             acc, iou, loss, iou_front = self.train_epoch(train_loader=self.parser.get_train_set(),
                                               epoch=epoch,
                                               evaluator=self.evaluator,
+                                              front_evaluator=self.front_evaluator,
                                               color_fn=self.parser.to_color,
                                               report=self.parser.get_train_size() // 10,
                                               show_scans=self.ARCH["train"]["show_scans"])
@@ -393,6 +397,7 @@ class Trainer():
                 print("*" * 80)
                 acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                          evaluator=self.evaluator,
+                                                         front_evaluator=self.front_evaluator,
                                                          class_func=self.parser.get_xentropy_class_string,
                                                          color_fn=self.parser.to_color,
                                                          save_scans=self.ARCH["train"]["save_scans"])
@@ -440,7 +445,7 @@ class Trainer():
             "%Y-%m-%d %H:%M:%S", time.localtime()))
         return
 
-    def train_epoch(self, train_loader, epoch, evaluator, color_fn, report=10, show_scans=False):
+    def train_epoch(self, train_loader, epoch, evaluator, front_evaluator, color_fn, report=10, show_scans=False):
         losses = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
@@ -502,9 +507,9 @@ class Trainer():
                 accuracy = evaluator.getacc()
                 jaccard, class_jaccard = evaluator.getIoUMissingClass()  ##TODO: Investigate difference to getIoU
                 #! IoU for camera FoV
-                evaluator.reset()
-                evaluator.addBatch(argmax*mask_front, proj_labels_front)
-                jaccard_front, class_jaccard = evaluator.getIoUMissingClass()
+                front_evaluator.reset()
+                front_evaluator.addBatch(argmax*mask_front, proj_labels_front)
+                jaccard_front, class_jaccard = front_evaluator.getIoUMissingClass()
 
             losses.update(loss.item(), in_vol.size(0))
             acc.update(accuracy.item(), in_vol.size(0))
@@ -568,7 +573,7 @@ class Trainer():
 
         return acc.avg, iou.avg, losses.avg, iou_front.avg
 
-    def validate(self, val_loader, evaluator, class_func, color_fn, save_scans):
+    def validate(self, val_loader, evaluator, front_evaluator, class_func, color_fn, save_scans):
         losses = AverageMeter()
         jaccs = AverageMeter()
         wces = AverageMeter()
@@ -580,6 +585,7 @@ class Trainer():
         # switch to evaluate mode
         self.model.eval()
         evaluator.reset()
+        front_evaluator.reset()
 
         # empty the cache to infer in high res
         if self.gpu:
@@ -613,6 +619,7 @@ class Trainer():
                 # measure accuracy and record loss
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
+                front_evaluator.addBatch(argmax*mask_front, proj_labels_front)
                 losses.update(loss.mean().item(), in_vol.size(0))
                 jaccs.update(jacc.mean().item(), in_vol.size(0))
 
@@ -638,9 +645,7 @@ class Trainer():
             accuracy = evaluator.getacc()
             jaccard, class_jaccard = evaluator.getIoUMissingClass()  ###TODO: Investigate change to getIoU
             #! IoU for camera FoV
-            evaluator.reset()
-            evaluator.addBatch(argmax*mask_front, proj_labels_front)
-            jaccard_front, class_jaccard_front = evaluator.getIoUMissingClass()
+            jaccard_front, class_jaccard_front = front_evaluator.getIoUMissingClass()
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
             iou_front.update(jaccard_front.item(), in_vol.size(0))
