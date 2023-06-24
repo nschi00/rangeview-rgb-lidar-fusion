@@ -3,7 +3,7 @@ import numpy as np
 from torch import nn, Tensor
 from torch.nn import functional as F
 from fast_attention import FlashMHA, FlashCrossMHA
-
+from mix_transformer import Mlp
 
 class SelfAttentionLayer(nn.Module):
 
@@ -174,6 +174,40 @@ def _get_activation_fn(activation):
     raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
 
 
+class FFN_seg(nn.Module):
+    def __init__(self, d_model, dim_feedforward=2048, dropout=0.0,
+                 activation="relu", normalize_before=False):
+        super().__init__()
+        # Implementation of Feedforward model
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(d_model)
+        self.mlp = Mlp(in_features=d_model, hidden_features=dim_feedforward)
+        self.normalize_before = normalize_before
+
+        self._reset_parameters()
+    
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward_post(self, tgt, H, W):
+        tgt2 = self.mlp(tgt, H, W)
+        tgt = tgt + self.dropout(tgt2)
+        tgt = self.norm(tgt)
+        return tgt
+
+    def forward_pre(self, tgt, H, W):
+        tgt2 = self.norm(tgt)
+        tgt2 = self.mlp(tgt, H, W)
+        tgt = tgt + self.dropout(tgt2)
+        return tgt
+
+    def forward(self, tgt, H, W):
+        if self.normalize_before:
+            return self.forward_pre(tgt, H, W)
+        return self.forward_post(tgt, H, W)
+
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
@@ -249,4 +283,27 @@ class Architechture_2(nn.Module):
             x = self.cross_attn[i](x, kv, query_key_padding_mask, pos, query_pos)
             x = self.self_attn[i](x, query_key_padding_mask, query_pos)
             x = self.fnn[i](x)
+        return x
+    
+
+class full_view_attn(nn.Module):
+    def __init__(self, dmodel, nhead: list, depth: int, dropout=0., activation="gelu", normalize_before=True) -> None:
+        super().__init__()
+        assert len(nhead) == depth
+        assert all(dmodel % np.array(nhead) == 0)
+        self.dmodel = dmodel
+        self.nhead = nhead
+        self.depth = depth
+        self.normalize_before = normalize_before
+        self.self_attn = nn.ModuleList([SelfAttentionLayer(dmodel, 
+                                                           nhead[i], 
+                                                           dropout,
+                                                           activation, 
+                                                           normalize_before) for i in range(depth)])
+        self.fnn = nn.ModuleList([FFN_seg(dmodel, dmodel*2, dropout, activation, normalize_before) for _ in range(depth)])
+        
+    def forward(self, x, query_pos=None, query_key_padding_mask=None, H=None, W=None):
+        for i in range(self.depth):
+            x = self.self_attn[i](x, query_key_padding_mask, query_pos)
+            x = self.fnn[i](x, H, W)
         return x

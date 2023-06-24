@@ -19,6 +19,8 @@ class RangePreprocess():
             query_masks = None
             
         if not training:
+            if query_masks != None:
+                data = torch.cat([data, query_masks.unsqueeze(1)], dim=1)
             return data, mask, label.long()
         bs = data.shape[0]
         assert bs > 2, "Batch size should be larger than 2"
@@ -51,12 +53,12 @@ class RangePreprocess():
                 
         out_scan = torch.stack(out_scan)
         out_label = torch.stack(out_label)
+        out_mask = out_scan[:, -1, :, :]
+        
         if len(query_masks_out) != 0:
             query_masks_out = torch.stack(query_masks_out)
-            out_mask = out_scan[:, -1, :, :]
-            out_scan[:, -1, :, :] = query_masks_out
-        else:
-            out_mask = out_scan[:, -1, :, :]
+            out_scan = torch.cat([out_scan, query_masks_out.unsqueeze(1)], dim=1)
+            
         return out_scan, out_mask, out_label.long()
     
     def RangeUnion(self, scan_a, label_a, scan_b, label_b, k_union=0.5, q_mask=None):

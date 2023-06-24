@@ -19,7 +19,7 @@ def overfit_test(model, batchsize, rgb_sze=None, lidar_sze=None):
         input_rgb = torch.rand(batchsize, c1, h1, w1).cuda() 
         
     c2, h2, w2 = lidar_sze
-    input_3D = torch.randn(batchsize, c2, h2, w2).cuda()
+    input_3D = torch.rand(batchsize, c2, h2, w2).cuda()
     label = torch.randint(0, 20, (batchsize, h2, w2)).cuda()
     criterion = nn.NLLLoss().cuda()
     ls = Lovasz_softmax(ignore=0).cuda()
@@ -36,8 +36,12 @@ def overfit_test(model, batchsize, rgb_sze=None, lidar_sze=None):
                 out = model(input_3D, input_rgb)
             else:
                 # ! TEST FOR FUSION ONLY
-                input_3D[:, -1, :, :] = (input_3D[:, -1, :, :] > 0.94)
-                input_3D[:, -1, :, :] = input_3D[:, -1, :, :]
+                
+                if c2 == 7:
+                    input_3D[:, -1, :, :] = (input_3D[:, -1, :, :] > 0.86)
+                    input_3D[:, -2, :, :] = (input_3D[:, -2, :, :] > 0.3)
+                else:
+                    input_3D[:, -1, :, :] = (input_3D[:, -1, :, :] > 0.86)
                 out = model(input_3D, input_rgb)
         if type(out) != list:
             out = [out]

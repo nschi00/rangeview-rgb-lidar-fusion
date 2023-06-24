@@ -121,7 +121,8 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
+        self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -146,7 +147,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes())
+                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=True)
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
@@ -277,26 +278,26 @@ class Trainer():
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         if self.path is not None:
             acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                             model=self.model,
-                                             criterion=self.criterion,
-                                             evaluator=self.evaluator,
-                                             class_func=self.parser.get_xentropy_class_string,
-                                             color_fn=self.parser.to_color,
-                                             save_scans=self.ARCH["train"]["save_scans"])
+                                                    model=self.model,
+                                                    criterion=self.criterion,
+                                                    evaluator=self.evaluator,
+                                                    class_func=self.parser.get_xentropy_class_string,
+                                                    color_fn=self.parser.to_color,
+                                                    save_scans=self.ARCH["train"]["save_scans"])
 
         # train for n epochs
         for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):
             # train for 1 epoch
 
             acc, iou, loss = self.train_epoch(train_loader=self.parser.get_train_set(),
-                                                           model=self.model,
-                                                           criterion=self.criterion,
-                                                           optimizer=self.optimizer,
-                                                           epoch=epoch,
-                                                           evaluator=self.evaluator,
-                                                           scheduler=self.scheduler,
-                                                           color_fn=self.parser.to_color,
-                                                           show_scans=self.ARCH["train"]["show_scans"])
+                                            model=self.model,
+                                            criterion=self.criterion,
+                                            optimizer=self.optimizer,
+                                            epoch=epoch,
+                                            evaluator=self.evaluator,
+                                            scheduler=self.scheduler,
+                                            color_fn=self.parser.to_color,
+                                            show_scans=self.ARCH["train"]["show_scans"])
 
 
             # update info
@@ -378,7 +379,7 @@ class Trainer():
         iou = AverageMeter()
         bd = AverageMeter()
         learning_rate = AverageMeter()
-
+        train=True
         # empty the cache to train now
         if self.gpu:
             torch.cuda.empty_cache()
@@ -407,18 +408,18 @@ class Trainer():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
                                                                           proj_mask, 
-                                                                          proj_labels,
-                                                                          True)
+                                                                          proj_labels, 
+                                                                          raining=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
-                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
-                                                                [proj_mask, query_mask], 
-                                                                proj_labels,
-                                                                True)
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
+                                                                          proj_labels,
+                                                                          training=train)
                 else:
-                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
-                                                                None, 
-                                                                proj_labels,
-                                                                False)
+                    in_vol, _, proj_labels = self.range_preprocess(in_vol, 
+                                                                   None, 
+                                                                   proj_labels,
+                                                                   False)
                 out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
@@ -517,7 +518,7 @@ class Trainer():
         acc = AverageMeter()
         iou = AverageMeter()
         rand_imgs = []
-
+        train=False
         # switch to evaluate mode
         model.eval()
         evaluator.reset()
@@ -539,12 +540,20 @@ class Trainer():
                 rgb_data = rgb_data.cuda()
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
-                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, proj_mask, proj_labels)
+                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
+                                                                          proj_mask, 
+                                                                          proj_labels, 
+                                                                          raining=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
-                    in_vol, _, proj_labels= self.range_preprocess(in_vol, 
-                                                                query_mask, 
-                                                                proj_labels,
-                                                                True)
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
+                                                                          proj_labels,
+                                                                          training=train)
+                else:
+                    in_vol, _, proj_labels = self.range_preprocess(in_vol, 
+                                                                   None, 
+                                                                   proj_labels,
+                                                                   False)
                 with torch.cuda.amp.autocast():
                     output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
