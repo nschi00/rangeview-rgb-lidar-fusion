@@ -409,7 +409,7 @@ class Trainer():
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
                                                                           proj_mask, 
                                                                           proj_labels, 
-                                                                          raining=train)
+                                                                          training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
