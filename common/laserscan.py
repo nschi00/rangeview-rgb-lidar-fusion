@@ -139,12 +139,12 @@ class LaserScan:
             self.points[:, 0] += jitter_x
             self.points[:, 1] += jitter_y
             self.points[:, 2] += jitter_z
-        # if self.rot:
-        #     euler_angle = np.random.normal(0, 90, 1)[0]  # 40
-        #     r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
-        #     r_t = r.transpose()
-        #     self.points = self.points.dot(r_t)
-        #     self.points = np.squeeze(self.points)
+        if self.rot:
+            euler_angle = np.random.normal(0, 90, 1)[0]  # 40
+            r = np.array(R.from_euler('zyx', [[euler_angle, 0, 0]], degrees=True).as_matrix())
+            r_t = r.transpose()
+            self.points = self.points.dot(r_t)
+            self.points = np.squeeze(self.points)
         if self.rotx is not False:
             r = np.array(R.from_euler('zyx', [[0, 0, self.rotx]], degrees=True).as_matrix())
             r_t = r.transpose()

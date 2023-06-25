@@ -203,13 +203,13 @@ class SemanticKitti(Dataset):
     rotx = False
     if self.transform:
         if random.random() > 0.5:
-    #         # if random.random() > 0.5:
-    #         #     DA = True
+            if random.random() > 0.5:
+                DA = True
             if random.random() > 0.5:
                 flip_sign = True
                 rgb_data = self.rgb_transform_random(rgb_data)
-            # if random.random() > 0.5:
-            #     rot = True
+            if random.random() > 0.5:
+                rot = True
     #             # print("Rotation around z activated.")
             # if random.random() > 0.5:
             #   rotx = np.random.normal(-10, 10, 1)[0]
@@ -295,13 +295,13 @@ class SemanticKitti(Dataset):
 
     proj = proj * proj_mask.float()
     
-    if rot: # Rotation Augmentation for front view
-      rand_shift = np.random.randint(0, proj.shape[2])
-      proj = torch.roll(proj, rand_shift, 2)
-      proj_mask = torch.roll(proj_mask, rand_shift, 1)
-      proj_labels = torch.roll(proj_labels, rand_shift, 1)
-      shift_rgb = np.floor(rand_shift * rgb_data.shape[2] / proj.shape[2]).astype('int')
-      rgb_data = torch.roll(rgb_data, shift_rgb, 2)
+    # if rot: # Rotation Augmentation for front view
+    #   rand_shift = np.random.randint(0, proj.shape[2])
+    #   proj = torch.roll(proj, rand_shift, 2)
+    #   proj_mask = torch.roll(proj_mask, rand_shift, 1)
+    #   proj_labels = torch.roll(proj_labels, rand_shift, 1)
+    #   shift_rgb = np.floor(rand_shift * rgb_data.shape[2] / proj.shape[2]).astype('int')
+    #   rgb_data = torch.roll(rgb_data, shift_rgb, 2)
 
     # get name and sequence
     path_norm = os.path.normpath(scan_file)
