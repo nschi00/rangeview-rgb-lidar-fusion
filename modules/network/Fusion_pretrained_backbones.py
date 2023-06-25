@@ -58,6 +58,9 @@ class Fusion(nn.Module):
         self.rgb_backbone.load_state_dict(w_dict['state_dict'], strict=True)
 
         for param in self.rgb_backbone.parameters():
+            param.requires_grad = True
+
+        for param in self.rgb_backbone.backbone.model.pixel_level_module.encoder.parameters():
             param.requires_grad = False
 
         self.rgb_backbone.backbone.class_predictor = nn.Linear(256, inplanes)
@@ -94,10 +97,10 @@ class Fusion(nn.Module):
         """Final layers"""
         self.semantic_output = nn.Conv2d(128, nclasses, 1)
 
-        if self.aux:
-            self.aux_heads = nn.ModuleDict()
-            for i in range(len(self.Fusion_depths)):
-                self.aux_heads["layer{}".format(i)] = nn.Conv2d(128*2, nclasses, 1)
+        # if self.aux:
+        #     self.aux_heads = nn.ModuleDict()
+        #     for i in range(len(self.Fusion_depths)):
+        #         self.aux_heads["layer{}".format(i)] = nn.Conv2d(128*2, nclasses, 1)
 
     def forward(self, lidar, rgb, mask_front):
         bs = lidar.shape[0]
