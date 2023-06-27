@@ -16,7 +16,7 @@ from RangeFormer import BasicConv2d
 from timm.models.layers import trunc_normal_
 from torchvision.models import resnet50
 from torchvision.models._utils import IntermediateLayerGetter
-from fast_decoder import Architechture_1, full_view_attn
+from fast_decoder import Architechture_1, full_view_attn, Architechture_3
 return_layers = {"layer3": "out"}
 
 
@@ -104,7 +104,7 @@ class Fusion(nn.Module):
                 m.bias.data.zero_()
 
 class Fusion_2(nn.Module):
-    def __init__(self, n_classes, d_model=128, depth=[4,4], size=[64,512], full_self_attn=False) -> None:
+    def __init__(self, n_classes, d_model=128, depth=[4,4], full_self_attn=False) -> None:
         super().__init__()
         assert type(depth) == list and len(depth) == 2
         self.lidar_model = ResNet_34(n_classes, aux=True)
@@ -112,15 +112,14 @@ class Fusion_2(nn.Module):
         rgb_backbone = resnet50(weights="IMAGENET1K_V2")
         #rgb_backbone.load_state_dict(torch.load('resnet50-19c8e357.pth'))
         self.rgb_backbone = IntermediateLayerGetter(rgb_backbone, return_layers=return_layers)
-        self.fusion = Architechture_1(d_model,
-                                      {"self": [2,4,4,8], "cross":[2,4,4,8]}, 
+        self.fusion = Architechture_3(d_model,
+                                      {"self": [2,4,4,2], "cross":[2,4,4,2]}, 
                                       {"self": depth[0], "cross": depth[1]}, 
                                       dropout=0., normalize_before=True)
         self.feat_2d_red = BasicConv2d(1024, d_model, kernel_size=1, padding=0)
         self.feat_3d_red = BasicConv2d(256, d_model, kernel_size=3, padding=1)
-        self.prediction = BasicConv2d(d_model, n_classes, kernel_size=1, padding=0)
+        self.prediction = BasicConv2d(d_model, n_classes, kernel_size=3, padding=1)
         self.pos = PositionEmbeddingSine(d_model//2)
-        self.query_pos = nn.Embedding(size[0] * size[1], d_model)
         if self.full_self_attn:
             self.full_view_attn = full_view_attn(d_model, [2,4,4,8], 4)
         print("Fusion model initialized")
@@ -146,7 +145,7 @@ class Fusion_2(nn.Module):
         query_fused = self.fusion(query, rgb_feature, 
                                   query_key_padding_mask=qmask, 
                                   pos=rgb_pos, 
-                                  query_pos=self.query_pos.weight)
+                                  H=H, W=W)
         
         lidar_feature = query_fused.transpose(1, 2).reshape(B, -1, H, W)
         if self.full_self_attn:
@@ -156,7 +155,7 @@ class Fusion_2(nn.Module):
             lidar_feature = lidar_feature.transpose(1, 2).reshape(B, -1, H, W)
             
         fused_pred = F.softmax(self.prediction(lidar_feature), dim=1)
-        out = [fused_pred] + lidar_out
+        out = [fused_pred] + lidar_out[:2]
         return out
 
     def _init_weights(self, m):

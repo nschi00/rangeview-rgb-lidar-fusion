@@ -285,6 +285,40 @@ class Architechture_2(nn.Module):
             x = self.fnn[i](x)
         return x
     
+class Architechture_3(nn.Module):
+    def __init__(self, dmodel, nhead: dict, depth: dict, dropout, activation="gelu", normalize_before=True) -> None:
+        super().__init__()
+        assert len(nhead["self"]) == depth["self"]
+        assert len(nhead["cross"]) == depth["cross"]
+        assert all(dmodel % np.array(nhead["self"]) == 0)
+        assert all(dmodel % np.array(nhead["cross"]) == 0)
+        self.dmodel = dmodel
+        self.nhead = nhead
+        self.depth = depth
+        self.normalize_before = normalize_before
+        self.self_attn = nn.ModuleList([SelfAttentionLayer(dmodel, 
+                                                           nhead["self"][i], 
+                                                           dropout,
+                                                           activation, 
+                                                           normalize_before) for i in range(depth["self"])])
+        self.cross_attn = nn.ModuleList([CrossAttentionLayer(dmodel,
+                                                             nhead["cross"][i],
+                                                             dropout,
+                                                             activation,
+                                                             normalize_before) for i in range(depth["cross"])])
+        self.self_fnn = nn.ModuleList([FFN_seg(dmodel, dmodel*2, 0., activation,normalize_before) for _ in range(depth["self"])])
+        self.cross_fnn = nn.ModuleList([FFN_seg(dmodel, dmodel*2, 0., activation,normalize_before) for _ in range(depth["cross"])])
+                                                
+        
+        
+    def forward(self, x, kv, pos=None, query_pos=None, query_key_padding_mask=None, H=None, W=None):
+        for attn, fnn in zip(self.cross_attn, self.cross_fnn):
+            x = attn(x, kv, query_key_padding_mask, pos, query_pos)
+            x = fnn(x, H, W)
+        for attn, fnn in zip(self.self_attn, self.self_fnn):
+            x = attn(x, query_key_padding_mask, query_pos)
+            x = fnn(x, H, W)
+        return x
 
 class full_view_attn(nn.Module):
     def __init__(self, dmodel, nhead: list, depth: int, dropout=0., activation="gelu", normalize_before=True) -> None:
