@@ -17,7 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.fusion import Fusion
+from modules.network.Fusion_pretrained_backbonesv2 import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -125,8 +125,9 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        # self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
+        self.range_preprocess = RangePreprocess([0.,0.,0.,0.]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -579,7 +580,7 @@ class Trainer():
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
                                                                           proj_mask, 
                                                                           proj_labels, 
-                                                                          raining=train)
+                                                                          training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 

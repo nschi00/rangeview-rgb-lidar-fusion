@@ -21,7 +21,8 @@ class RangePreprocess():
         if not training:
             if query_masks != None:
                 data = torch.cat([data, query_masks.unsqueeze(1)], dim=1)
-            return data, mask, label.long()
+                proj_mask = mask[0]
+            return data, proj_mask, label.long()
         bs = data.shape[0]
         assert bs > 2, "Batch size should be larger than 2"
         out_scan = []

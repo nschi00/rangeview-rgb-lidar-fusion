@@ -104,22 +104,22 @@ class SemanticKitti(Dataset):
                         "type": "new"}
         
       self.img_aug_prob = {"scaling": 0.0,
-                           "C_jittering": 0.5,
-                           "H_flip": 0.5,
-                           "V_flip": 0.5,}
+                           "C_jittering": 0.,
+                           "H_flip": 0.,
+                           "V_flip": 0.,}
                            
       ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
       self.img_transform = TF.Compose([TF.ToTensor(),
                                       ColorJitter,
                                       TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
                                       TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
-                                     TF.Resize((256, 768)),
+                                     TF.Resize((376, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
       self.aug_prob = defaultdict(lambda: -1.0)
       self.aug_prob["point_dropping"] = [-1.0, -1.0]
       self.img_transform = TF.Compose([TF.ToTensor(),
-                                     TF.Resize((256, 768)),
+                                     TF.Resize((376, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     
     # get number of classes (can't be len(self.learning_map) because there
