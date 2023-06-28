@@ -121,8 +121,9 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        #self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
+        #self.range_preprocess = RangePreprocess([0,0,0,0]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -157,6 +158,7 @@ class Trainer():
         print("Number of workers: ", self.ARCH["train"]["workers"])
         print("Batch size: ", self.ARCH["train"]["batch_size"])
         print("Subset ratio: ", self.ARCH["train"]["subset_ratio"])
+        print("RangeAug prob: ", self.range_preprocess.aug_prob)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
