@@ -24,6 +24,7 @@ class Fusion(nn.Module):
     def __init__(self, n_classes, d_model=128, depth=[4,4], n_queries=6500, full_self_attn=False) -> None:
         super().__init__()
         assert type(depth) == list and len(depth) == 2
+        print("BECAREFUL: FULL-SELF ATTN IS: ", full_self_attn)
         self.lidar_model = ResNet_34(n_classes, aux=True)
         self.n_queries = n_queries
         self.full_self_attn = full_self_attn
@@ -107,6 +108,7 @@ class Fusion_2(nn.Module):
     def __init__(self, n_classes, d_model=128, depth=[4,4], full_self_attn=False) -> None:
         super().__init__()
         assert type(depth) == list and len(depth) == 2
+        print("BECAREFUL: FULL-SELF ATTN IS: ", full_self_attn)
         self.lidar_model = ResNet_34(n_classes, aux=True)
         self.full_self_attn = full_self_attn
         rgb_backbone = resnet50(weights="IMAGENET1K_V2")

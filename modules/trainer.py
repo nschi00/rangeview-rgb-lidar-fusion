@@ -17,7 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.fusion import Fusion
+from modules.network.fusion import Fusion, Fusion_2
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -147,7 +147,8 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=True)
+                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                #self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
