@@ -10,6 +10,8 @@ class RangePreprocess():
             self.aug_prob = aug_prob
     
     def __call__(self, data, masks: list, label, training=False):
+        if self.aug_prob == [0., 0., 0., 0.]:
+            training = False
         if not training:
             for mask in masks:
                 if mask is None:
