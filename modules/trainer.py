@@ -415,7 +415,7 @@ class Trainer():
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,
-                                                                          training=False)
+                                                                          training=train)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
                                                                    [None, None], 
