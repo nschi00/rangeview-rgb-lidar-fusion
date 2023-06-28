@@ -147,8 +147,8 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
-                #self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
+                #self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
@@ -518,12 +518,14 @@ class Trainer():
         wces = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
+        iou_front = AverageMeter()
         rand_imgs = []
         train=False
         # switch to evaluate mode
         model.eval()
         evaluator.reset()
-
+        front_evaluator = iouEval(self.parser.get_n_classes(),
+                                    self.device, self.ignore_class)
         # empty the cache to infer in high res
         if self.gpu:
             torch.cuda.empty_cache()
@@ -568,6 +570,7 @@ class Trainer():
                 # measure accuracy and record loss
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
+                front_evaluator.addBatch(argmax*query_mask, (proj_labels*query_mask).long())
                 losses.update(loss.mean().item(), in_vol.size(0))
                 jaccs.update(jacc.mean().item(),in_vol.size(0))
 
@@ -596,17 +599,22 @@ class Trainer():
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 
+            f_accuracy = front_evaluator.getacc()
+            f_jaccard, f_class_jaccard = front_evaluator.getIoUMissingClass()
+            iou_front.update(f_jaccard.item(), in_vol.size(0))
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
                   'Loss avg {loss.avg:.4f}\n'
                   'Jaccard avg {jac.avg:.4f}\n'
                   'WCE avg {wces.avg:.4f}\n'
                   'Acc avg {acc.avg:.3f}\n'
-                  'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
+                  'IoU avg {iou.avg:.3f}\n'
+                  'Front IoU avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
                                                  loss=losses,
                                                  jac=jaccs,
                                                  wces=wces,
-                                                 acc=acc, iou=iou))
+                                                 acc=acc, iou=iou,
+                                                 iou_front=iou_front))
 
             save_to_log(self.log, 'log.txt', 'Validation set:\n'
                                              'Time avg per batch {batch_time.avg:.3f}\n'
