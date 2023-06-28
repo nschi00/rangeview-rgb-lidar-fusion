@@ -408,17 +408,17 @@ class Trainer():
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask, 
+                                                                          [proj_mask, None], 
                                                                           proj_labels, 
                                                                           training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,
-                                                                          training=train)
+                                                                          training=False)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
-                                                                   None, 
+                                                                   [None, None], 
                                                                    proj_labels,
                                                                    False)
                 out = model(in_vol, rgb_data)
@@ -544,9 +544,9 @@ class Trainer():
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask, 
+                                                                          [proj_mask, None], 
                                                                           proj_labels, 
-                                                                          raining=train)
+                                                                          training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
@@ -554,7 +554,7 @@ class Trainer():
                                                                           training=train)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
-                                                                   None, 
+                                                                   [None, None], 
                                                                    proj_labels,
                                                                    False)
                 with torch.cuda.amp.autocast():

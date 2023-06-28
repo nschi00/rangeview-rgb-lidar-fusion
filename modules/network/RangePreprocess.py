@@ -9,18 +9,22 @@ class RangePreprocess():
         else:
             self.aug_prob = aug_prob
     
-    def __call__(self, data, mask, label, training=False):
-        if type(mask) == list:
-            data = torch.cat([data, mask[0].unsqueeze(1)], dim=1)
-            query_masks = mask[1]
-        else:
-            if mask is not None:
+    def __call__(self, data, masks: list, label, training=False):
+        if not training:
+            for mask in masks:
+                if mask is None:
+                    continue
                 data = torch.cat([data, mask.unsqueeze(1)], dim=1)
-            query_masks = None
+            return data, masks[0], label.long()
+        
+        data = torch.cat([data, masks[0].unsqueeze(1)], dim=1)
+        query_masks = masks[1]
             
         if not training:
             if query_masks != None:
                 data = torch.cat([data, query_masks.unsqueeze(1)], dim=1)
+            if type(mask) == list:
+                return data, mask[0], label.long()
             return data, mask, label.long()
         bs = data.shape[0]
         assert bs > 2, "Batch size should be larger than 2"
