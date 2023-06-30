@@ -86,7 +86,7 @@ class Fusion(nn.Module):
         window_size = 8
         height = (64 // upscale // window_size + 1) * window_size
         width = (512 // upscale // window_size + 1) * window_size
-        self.fusion = SwinFusion(upscale=upscale, img_size=(height, width), Fusion_depths=self.Fusion_depths,
+        self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width), Fusion_depths=self.Fusion_depths,
                     window_size=window_size, embed_dim=128, Fusion_num_heads=self.Fusion_num_heads,
                     Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
@@ -122,7 +122,7 @@ class Fusion(nn.Module):
         x_rgb = self.bn_rgb(x_rgb)
 
         """Fusion Module"""
-        fusion_out, _ = self.fusion(x_lidar_fusion, x_rgb)
+        fusion_out, _ = self.fusion_layer(x_lidar_fusion, x_rgb)
 
         x_fusion = torch.zeros_like(x_lidar)
 

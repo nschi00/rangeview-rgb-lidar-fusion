@@ -36,7 +36,10 @@ def get_Optim(model, config, iter_per_epoch = None):
 
     total_iter = iter_per_epoch * config["train"]["max_epochs"]
     # * F&B_mutiplier set to 1.0 will train all parameters with the same learning rate
-    optimizer = optimizer(model.parameters(), **optimizer_cfg[optim_name])
+    optimizer = optimizer(
+            [{"params":fusion_params, "lr": optimizer_cfg[optim_name]["lr"] *
+                                            optimizer_cfg["F&B_mutiplier"]}, 
+             {"params": rest_params}], **optimizer_cfg[optim_name])
 
     # * Set up scheduler if needed
     if scheduler_cfg is not None and scheduler_cfg["Name"] != "None":

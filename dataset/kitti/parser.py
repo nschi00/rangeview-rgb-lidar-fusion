@@ -103,7 +103,7 @@ class SemanticKitti(Dataset):
                         "point_dropping": [0.9, 0.1],
                         "type": "new"}
         
-      self.img_aug_prob = {"scaling": 0.0,
+      self.img_aug_prob = {"scaling": 0.,
                            "C_jittering": 0.,
                            "H_flip": 0.,
                            "V_flip": 0.,}
@@ -275,6 +275,11 @@ class SemanticKitti(Dataset):
                       proj_idx]
     
     rgb_data = self.img_transform(rgb_data)
+
+    if scan.flag_flip:
+      rgb_flip = TF.RandomHorizontalFlip(p=1.0)
+      rgb_data = rgb_flip(rgb_data)
+
     # return
     return projected_data, rgb_data
 
