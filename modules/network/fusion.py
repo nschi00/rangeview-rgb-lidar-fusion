@@ -38,7 +38,7 @@ class Fusion(nn.Module):
         self.feat_2d_red = BasicConv2d(1024, d_model, kernel_size=1, padding=0)
         self.feat_3d_red = BasicConv2d(256, d_model, kernel_size=3, padding=1)
         self.prediction = BasicConv2d(d_model, n_classes, kernel_size=1, padding=0)
-        self.pos = PositionEmbeddingSine(d_model//2)
+        self.pos = PositionEmbeddingSine(d_model//2, normalize=True) # ! Add normalize=True
         self.query_pos = nn.Embedding(n_queries, d_model)
         if self.full_self_attn:
             self.full_view_attn = full_view_attn(d_model, [2,4,4,8], 4)
@@ -74,7 +74,7 @@ class Fusion(nn.Module):
         query_fused = self.fusion(query, rgb_feature, 
                                   query_key_padding_mask=query_mask, 
                                   pos=rgb_pos, 
-                                  query_pos=self.query_pos.weight)
+                                  query_pos=self.query_pos.weight.unsqueeze(0).repeat(B, 1, 1))
         
         for i in range(B):
             lidar_feature[i, :, qmask[i, :]] = query_fused[i, query_mask[i, :], :].transpose(0, 1)

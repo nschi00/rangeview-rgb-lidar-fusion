@@ -34,11 +34,13 @@ class RangePreprocess():
         out_label = []
         query_masks_out = []
         matched_dict = defaultdict(lambda: -1)
+        selection_pool = set(range(bs))
         for i in range(bs):
-            j = random.randint(0, bs-1)
+            j = random.sample(selection_pool, 1)[0]
             while j == i or matched_dict[j] == i:
-                j = random.randint(0, bs-1)
+                j = random.sample(selection_pool, 1)[0]
             matched_dict[i] = j
+            selection_pool.remove(j)
                 
             scan_a, scan_b = data[i].clone(), data[j]
             label_a, label_b = label[i].clone(), label[j]
