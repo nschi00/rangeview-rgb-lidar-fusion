@@ -3,20 +3,24 @@ import random
 
 def match_elements(n):
     list1 = list(range(n))
-    list2 = list1.copy()
-    random.shuffle(list2)
-
-    matches = {}
-    not_allowed = set()
-
-    for i in range(n):
-        current_element = list1[i]
-        for j in range(n):
-            if list2[j] != current_element and (current_element, list2[j]) not in not_allowed:
-                matches[current_element] = list2[j]
-                not_allowed.add((list2[j], current_element))
-                del list2[j]
-                break
+    finished = False
+    while not finished:
+        try:
+            list2 = list1.copy()
+            random.shuffle(list2)
+            matches = {}
+            not_allowed = set()
+            for i in range(n):
+                current_element = list1[i]
+                for j in range(n):
+                    if list2[j] != current_element and (current_element, list2[j]) not in not_allowed:
+                        matches[current_element] = list2[j]
+                        not_allowed.add((list2[j], current_element))
+                        del list2[j]
+                        break
+            finished = True
+        except:
+            finished = False
 
     return matches
 
