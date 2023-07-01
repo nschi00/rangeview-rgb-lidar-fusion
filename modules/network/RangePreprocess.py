@@ -1,6 +1,24 @@
 import torch
-from collections import defaultdict
 import random
+
+def match_elements(n):
+    list1 = list(range(n))
+    list2 = list1.copy()
+    random.shuffle(list2)
+
+    matches = {}
+    not_allowed = set()
+
+    for i in range(n):
+        current_element = list1[i]
+        for j in range(n):
+            if list2[j] != current_element and (current_element, list2[j]) not in not_allowed:
+                matches[current_element] = list2[j]
+                not_allowed.add((list2[j], current_element))
+                del list2[j]
+                break
+
+    return matches
 
 class RangePreprocess():
     def __init__(self, aug_prob = None) -> None:
@@ -33,15 +51,9 @@ class RangePreprocess():
         out_scan = []
         out_label = []
         query_masks_out = []
-        matched_dict = defaultdict(lambda: -1)
-        selection_pool = set(range(bs))
+        match_dict = match_elements(bs)
         for i in range(bs):
-            j = random.sample(selection_pool, 1)[0]
-            while j == i or matched_dict[j] == i:
-                j = random.sample(selection_pool, 1)[0]
-            matched_dict[i] = j
-            selection_pool.remove(j)
-                
+            j = match_dict[i]
             scan_a, scan_b = data[i].clone(), data[j]
             label_a, label_b = label[i].clone(), label[j]
             query_mask = query_masks[i].clone() if query_masks != None else None
