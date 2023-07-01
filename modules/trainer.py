@@ -22,7 +22,7 @@ from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 # pip install 'git+https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup'
 from dataset.kitti.parser import Parser
 from modules.network.ResNet import ResNet_34
-from modules.network.Fusion_resnet_swin import Fusion
+# from modules.network.Fusion_resnet_swin import Fusion
 from modules.network.Mask2Former_RGB import Backbone_RGB
 #from modules.network.ResNetFusion import Fusion
 from modules.network.Mask2Former import Mask2FormerBasePrototype
