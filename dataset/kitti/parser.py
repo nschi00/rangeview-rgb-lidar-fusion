@@ -120,6 +120,7 @@ class SemanticKitti(Dataset):
     else:
       self.aug_prob = defaultdict(lambda: -1.0)
       self.aug_prob["point_dropping"] = [-1.0, -1.0]
+      self.aug_prob["flipped"] = False
       self.img_transform = TF.Compose([TF.ToTensor(),
                                      TF.Resize((256, 768)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
