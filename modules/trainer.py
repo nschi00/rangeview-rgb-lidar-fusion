@@ -612,11 +612,11 @@ class Trainer():
                   'Acc avg {acc.avg:.3f}\n'
                   'IoU avg {iou.avg:.3f}\n'
                   'Front IoU avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
-                                                 loss=losses,
-                                                 jac=jaccs,
-                                                 wces=wces,
-                                                 acc=acc, iou=iou,
-                                                 iou_front=iou_front))
+                                                            loss=losses,
+                                                            jac=jaccs,
+                                                            wces=wces,
+                                                            acc=acc, iou=iou,
+                                                            iou_front=iou_front))
 
             save_to_log(self.log, 'log.txt', 'Validation set:\n'
                                              'Time avg per batch {batch_time.avg:.3f}\n'
@@ -624,11 +624,13 @@ class Trainer():
                                              'Jaccard avg {jac.avg:.4f}\n'
                                              'WCE avg {wces.avg:.4f}\n'
                                              'Acc avg {acc.avg:.3f}\n'
-                                             'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
-                                                                            loss=losses,
-                                                                            jac=jaccs,
-                                                                            wces=wces,
-                                                                            acc=acc, iou=iou))
+                                             'IoU avg {iou.avg:.3f}\n'
+                                             'Front IoU avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
+                                                                                        loss=losses,
+                                                                                        jac=jaccs,
+                                                                                        wces=wces,
+                                                                                        acc=acc, iou=iou,
+                                                                                        iou_front=iou_front))
             # print also classwise
             for i, jacc in enumerate(class_jaccard):
                 print('IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
