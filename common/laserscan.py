@@ -125,7 +125,7 @@ class LaserScan:
         # check remission makes sense
         if remissions is not None and not isinstance(remissions, np.ndarray):
             raise TypeError("Remissions should be numpy array")
-
+        self.aug_prob["flipped"] = False
         # put in attribute
         self.points = points  # get
         if random.random() < self.aug_prob["scaling"]:
@@ -135,6 +135,7 @@ class LaserScan:
         if random.random() < self.aug_prob["jittering"]:
             self.RandomJittering()
         if random.random() < self.aug_prob["flipping"]:
+            self.aug_prob["flipped"] = True
             self.RandomFlipping(mode=self.aug_prob["type"])
 
         if remissions is not None:

@@ -9,6 +9,7 @@ import torch
 import random
 from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -109,10 +110,11 @@ class SemanticKitti(Dataset):
                            "V_flip": 0.5,}
                            
       ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
+      self.flip = TF.RandomHorizontalFlip(p=1.0)
       self.img_transform = TF.Compose([TF.ToTensor(),
-                                      ColorJitter,
-                                      TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
-                                      TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
+                                      # ColorJitter,
+                                      # TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
+                                      # TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
                                      TF.Resize((256, 768)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
@@ -275,6 +277,15 @@ class SemanticKitti(Dataset):
                       proj_idx]
     
     rgb_data = self.img_transform(rgb_data)
+    
+    if self.aug_prob["flipped"]:
+      rgb_data = self.flip(rgb_data)
+    
+    # * VISUALIZATION IF NEEDED
+    # fig, (ax1, ax2) = plt.subplots(1, 2)
+    # ax1.imshow(rgb_data.permute(1, 2, 0))
+    # ax2.imshow(scan.proj_sem_label)
+    # plt.show()
     # return
     return projected_data, rgb_data
 
