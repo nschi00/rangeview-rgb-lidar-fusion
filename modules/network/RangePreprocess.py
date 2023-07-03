@@ -31,15 +31,15 @@ class RangePreprocess():
         query_masks_out = []
         matched_dict = defaultdict(lambda: -1)
         for i in range(bs):
-            if bs > 2:
-                j = random.randint(0, bs-1)
-                while j == i or matched_dict[j] == i:
-                    j = random.randint(0, bs-1)
-                matched_dict[i] = j
-            elif bs == 2:
-                j = 1 if i == 0 else 0
-            else:
-                j = i
+            # if bs > 2:
+            #     j = random.randint(0, bs-1)
+            #     while j == i or matched_dict[j] == i:
+            #         j = random.randint(0, bs-1)
+            #     matched_dict[i] = j
+            # elif bs == 2:
+            #     j = 1 if i == 0 else 0
+            # else:
+            j = i
                 
             scan_a, scan_b = data[i].clone(), data[j]
             label_a, label_b = label[i].clone(), label[j]

@@ -13,7 +13,7 @@ class Backbone_RGB(nn.Module):
     def __init__(self, nclasses, aux=False):
         super(Backbone_RGB, self).__init__()
 
-        weight = "facebook/mask2former-swin-tiny-cityscapes-semantic"
+        weight = "logs/lidar_front_25_rgb_mask2former_retrainTransPixDec_rgbfullsizeNormalize_noDropPoints/models--facebook--mask2former-swin-tiny-cityscapes-semantic/snapshots/414e5f2219df2e2e56703b856bbce4cc7b7046b9"
 
         self.backbone = Mask2FormerForUniversalSegmentation.from_pretrained(weight)
 
@@ -31,8 +31,6 @@ class Backbone_RGB(nn.Module):
         x = self.backbone(x, output_hidden_states=True)
 
         out = self.post_process_semantic_segmentation(x, [target_size for _ in range(bs)])
-
-        # out = self.class_predictor(out)
 
         out = F.softmax(out, dim=1)
 
@@ -59,11 +57,6 @@ class Backbone_RGB(nn.Module):
         """
         class_queries_logits = outputs.class_queries_logits  # [batch_size, num_queries, num_classes+1]
         masks_queries_logits = outputs.masks_queries_logits  # [batch_size, num_queries, height, width]
-
-        # Scale back to preprocessed image size - (384, 384) for all models
-        masks_queries_logits = torch.nn.functional.interpolate(
-            masks_queries_logits, size=(384, 384), mode="bilinear", align_corners=False
-        )
 
         masks_classes = class_queries_logits.softmax(dim=-1)
         masks_probs = masks_queries_logits.sigmoid()  # [batch_size, num_queries, height, width]

@@ -91,12 +91,6 @@ class LaserScan:
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
 
-        fov_hor = [-90, 90]
-        fov_vert = [-90, 90]
-        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
-        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
-        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
-
         if random.random() < self.aug_prob["point_dropping"][0]:
             if self.aug_prob["type"] == "new":
                 self.drop_points = random.uniform(0.0, self.aug_prob["point_dropping"][1])
@@ -107,6 +101,12 @@ class LaserScan:
             remissions = np.delete(remissions,self.points_to_drop)
         else:
             self.drop_points = False
+        
+        fov_hor = [-90, 90]
+        fov_vert = [-90, 90]
+        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
+        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
+        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
 
         self.set_points(points, remissions)
 
