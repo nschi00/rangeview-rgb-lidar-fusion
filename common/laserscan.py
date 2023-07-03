@@ -23,6 +23,11 @@ class LaserScan:
         self.proj_fov_up = fov_up
         self.proj_fov_down = fov_down
         self.aug_prob = aug_prob
+        self.only_rgb = True
+        if self.only_rgb:
+            self.proj_H = 64
+            self.proj_W = 192
+            self.fov_vert = [-14, 5]
         self.reset()
 
     def reset(self):
@@ -91,12 +96,6 @@ class LaserScan:
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
 
-        fov_hor = [-90, 90]
-        fov_vert = [-90, 90]
-        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
-        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
-        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
-
         if random.random() < self.aug_prob["point_dropping"][0]:
             if self.aug_prob["type"] == "new":
                 self.drop_points = random.uniform(0.0, self.aug_prob["point_dropping"][1])
@@ -107,6 +106,16 @@ class LaserScan:
             remissions = np.delete(remissions,self.points_to_drop)
         else:
             self.drop_points = False
+        
+        fov_hor = [-90, 90]
+        fov_vert = [-90, 90]
+        mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
+        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
+        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
+
+        if self.only_rgb:
+            points = points[self.point_idx_camera_fov]
+            remissions = remissions[self.point_idx_camera_fov]
 
         self.set_points(points, remissions)
 
@@ -255,8 +264,13 @@ class LaserScan:
         pitch = np.arcsin(scan_z / depth)
 
         # get projections in image coords
-        proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
-        proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
+        if self.only_rgb:
+            fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
+            proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
+            proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
+        else:
+            proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+            proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
@@ -595,6 +609,8 @@ class SemLaserScan(LaserScan):
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)
+
+        label = label[self.point_idx_camera_fov] if self.only_rgb else label
         # set it
         self.set_label(label)
 

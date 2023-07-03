@@ -6,6 +6,7 @@ import time
 import cv2
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from common.avgmeter import *
@@ -16,11 +17,12 @@ from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 from modules.network.Fusion_pretrained_backbonesv2 import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
+from modules.network.ResNetFPN import RGB_Net
 from tqdm import tqdm
 
 def get_Optim(model, config, iter_per_epoch = None):
@@ -156,6 +158,8 @@ class Trainer():
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
                 self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+            elif self.ARCH["train"]["pipeline"] == "rgb":
+                self.model = RGB_Net(self.parser.get_n_classes())
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
@@ -354,6 +358,10 @@ class Trainer():
                                                          class_func=self.parser.get_xentropy_class_string,
                                                          color_fn=self.parser.to_color,
                                                          save_scans=self.ARCH["train"]["save_scans"])
+                
+                if self.ARCH["scheduler"]["Name"] == "ReduceLROnPlateau":
+                    # Update the learning rate scheduler
+                    self.scheduler.step(loss)
 
                 # update info
                 self.info["valid_loss"] = loss
@@ -423,7 +431,7 @@ class Trainer():
             if not self.multi_gpu and self.gpu:
                 in_vol = in_vol.cuda()
             if self.gpu:
-                proj_labels = proj_labels.cuda().long()
+                proj_labels = proj_labels.cuda()
                 proj_mask = proj_mask.cuda()
                 rgb_data = rgb_data.cuda()
                 query_mask = query_mask.cuda()
@@ -441,6 +449,11 @@ class Trainer():
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,
                                                                           training=train)
+                elif self.ARCH["train"]["pipeline"] == "rgb":
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
+                                                                          proj_labels,
+                                                                          training=False)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
                                                                    None, 
@@ -543,7 +556,8 @@ class Trainer():
                     data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
                     iou_front=iou_front, estim=self.calculate_estimate(epoch, i)))
             # step scheduler
-            scheduler.step()
+            if self.ARCH["scheduler"]["Name"] != "ReduceLROnPlateau":
+                scheduler.step()
 
         return acc.avg, iou.avg, losses.avg, iou_front.avg
 
@@ -585,6 +599,11 @@ class Trainer():
                                                                           proj_labels, 
                                                                           training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
+                                                                          proj_labels,
+                                                                          training=train)
+                elif self.ARCH["train"]["pipeline"] == "rgb":
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,

@@ -90,10 +90,10 @@ class SemanticKitti(Dataset):
     if self.transform:
       if old_aug:
         self.aug_prob = {"scaling": 0.0,
-                         "rotation": 0.5,
-                         "jittering": 0.5,
+                         "rotation": 0.0,
+                         "jittering": 0.0,
                          "flipping": 0.5,
-                         "point_dropping": [0.5, 0.5],
+                         "point_dropping": [0.0, 0.0],
                          "type": "old"}
       else:
         self.aug_prob = {"scaling": 1.0,
@@ -104,7 +104,7 @@ class SemanticKitti(Dataset):
                         "type": "new"}
         
       self.img_aug_prob = {"scaling": 0.,
-                           "C_jittering": 0.,
+                           "C_jittering": 0.5,
                            "H_flip": 0.,
                            "V_flip": 0.,}
                            
