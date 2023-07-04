@@ -331,7 +331,7 @@ class Trainer():
             if epoch % self.ARCH["train"]["report_epoch"] == 0:
                 # evaluate on validation set
                 print("*" * 80)
-                acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+                acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                          model=self.model,
                                                          criterion=self.criterion,
                                                          evaluator=self.evaluator,
@@ -343,6 +343,7 @@ class Trainer():
                 self.info["valid_loss"] = loss
                 self.info["valid_acc"] = acc
                 self.info["valid_iou"] = iou
+                self.info["valid_iou_front"] = iou_front
 
             # remember best iou and save checkpoint
             if self.info['valid_iou'] > self.info['best_val_iou']:
@@ -350,7 +351,7 @@ class Trainer():
                 print("Best mean iou in validation so far, save model!")
                 print("*" * 80)
                 self.info['best_val_iou'] = self.info['valid_iou']
-
+                self.info['best_val_iou_front'] = self.info['valid_iou_front']
                 # save the weights!
                 state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                          'optimizer': self.optimizer.state_dict(),
@@ -640,4 +641,4 @@ class Trainer():
                 self.info["valid_classes/" + class_func(i)] = jacc
 
 
-        return acc.avg, iou.avg, losses.avg, rand_imgs
+        return acc.avg, iou.avg, losses.avg, rand_imgs, iou_front.avg
