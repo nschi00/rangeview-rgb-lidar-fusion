@@ -172,6 +172,7 @@ class ResNet_34(nn.Module):
 
         out = torch.cat(res, dim=1)
         out = self.conv_1(out)
+        self.feature_3D = out # Save 3D feature map
         out = self.conv_2(out)
         out = self.semantic_output(out)
         out = F.softmax(out, dim=1)
@@ -190,11 +191,12 @@ class ResNet_34(nn.Module):
             return [out, res_2, res_3, res_4]
         else:
             return out
+        
 
 
 if __name__ == "__main__":
     import time
-    model = Fusion(20).cuda()
+    model = ResNet_34(20).cuda()
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters: ", pytorch_total_params / 1000000, "M")
     time_train = []

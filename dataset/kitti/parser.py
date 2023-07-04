@@ -9,6 +9,7 @@ import torch
 import random
 from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -86,7 +87,7 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
-    self.img_transform = TF.Compose([TF.ToTensor(), TF.Resize((self.sensor_img_H, self.sensor_img_W))])
+    
     if self.transform:
       if old_aug:
         self.aug_prob = {"scaling": 0.0,
@@ -102,10 +103,27 @@ class SemanticKitti(Dataset):
                         "flipping": 1.0,
                         "point_dropping": [0.9, 0.1],
                         "type": "new"}
-      print(self.aug_prob)
+        
+      self.img_aug_prob = {"scaling": 0.0,
+                           "C_jittering": 0.5,
+                           "H_flip": 0.5,
+                           "V_flip": 0.5,}
+                           
+      ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
+      self.flip = TF.RandomHorizontalFlip(p=1.0)
+      self.img_transform = TF.Compose([TF.ToTensor(),
+                                      # ColorJitter,
+                                      # TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
+                                      # TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
+                                     TF.Resize((256, 768)),
+                                     TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
       self.aug_prob = defaultdict(lambda: -1.0)
       self.aug_prob["point_dropping"] = [-1.0, -1.0]
+      self.aug_prob["flipped"] = False
+      self.img_transform = TF.Compose([TF.ToTensor(),
+                                     TF.Resize((256, 768)),
+                                     TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -177,7 +195,7 @@ class SemanticKitti(Dataset):
   def __getitem__(self, index):
     # get item in tensor shape
     scan_file = self.scan_files[index]
-    rgb_data = self.img_transform(Image.open(self.rgb_files[index]))
+    rgb_data = Image.open(self.rgb_files[index])
 
     if self.gt:
       label_file = self.label_files[index]
@@ -200,7 +218,7 @@ class SemanticKitti(Dataset):
                        aug_prob=self.aug_prob)
 
     # open and obtain scan
-    scan.open_scan(scan_file)
+    scan.open_scan(scan_file, rgb_data)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -213,6 +231,11 @@ class SemanticKitti(Dataset):
     proj_range = torch.from_numpy(scan.proj_range).clone()
     proj_xyz = torch.from_numpy(scan.proj_xyz).clone()
     proj_remission = torch.from_numpy(scan.proj_remission).clone()
+    proj_idx = torch.from_numpy(scan.proj_idx).clone()
+    query_mask = torch.from_numpy(scan.query_mask).clone()
+    # query_idx = np.full((self.sensor_img_H * self.sensor_img_W), -1, dtype=np.int16)
+    # query_idx[:scan.point_idx_rv_camera_fov.shape[0]] = scan.point_idx_rv_camera_fov
+    # query_idx = torch.from_numpy(query_idx).clone()
 
 #     proj_normal = torch.from_numpy(scan.normal_image).clone()
 
@@ -248,13 +271,22 @@ class SemanticKitti(Dataset):
     path_name = path_split[-1].replace(".bin", ".label")
     projected_data = [proj, 
                       proj_mask, 
-                      proj_labels, 
+                      proj_labels,
+                      query_mask, 
                       path_seq, 
                       path_name, 
-                      proj_x, proj_y, 
-                      proj_range,  
-                      proj_xyz, 
-                      proj_remission]
+                      proj_idx]
+    
+    rgb_data = self.img_transform(rgb_data)
+    
+    if self.aug_prob["flipped"]:
+      rgb_data = self.flip(rgb_data)
+    
+    # * VISUALIZATION IF NEEDED
+    # fig, (ax1, ax2) = plt.subplots(1, 2)
+    # ax1.imshow(rgb_data.permute(1, 2, 0))
+    # ax2.imshow(scan.proj_sem_label)
+    # plt.show()
     # return
     return projected_data, rgb_data
 

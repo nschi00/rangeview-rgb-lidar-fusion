@@ -6,7 +6,7 @@ import shutil
 from shutil import copyfile
 import yaml
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from modules.trainer import Trainer
 
 
@@ -31,7 +31,7 @@ if __name__ == '__main__':
         '--dataset', '-d',
         type=str,
         required=False,
-        default='../SemanticKITTI/dataset',
+        default='../SemanticKITTI/dataset', #/raid/s3/ks_temp/dataset/
         help='Dataset to train with. No Default',
     )
     parser.add_argument(

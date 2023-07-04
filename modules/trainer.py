@@ -17,6 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
+from modules.network.fusion import Fusion, Fusion_2
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -120,7 +121,9 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        self.range_preprocess = RangePreprocess()
+        #self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
+        #self.range_preprocess = RangePreprocess([0,0,0,0]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -144,6 +147,10 @@ class Trainer():
                 convert_relu_to_softplus(self.model, activation)
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
+            elif self.ARCH["train"]["pipeline"] == "fusion":
+                #self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
+                
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -151,6 +158,7 @@ class Trainer():
         print("Number of workers: ", self.ARCH["train"]["workers"])
         print("Batch size: ", self.ARCH["train"]["batch_size"])
         print("Subset ratio: ", self.ARCH["train"]["subset_ratio"])
+        print("RangeAug prob: ", self.range_preprocess.aug_prob)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
@@ -189,15 +197,16 @@ class Trainer():
                                         self.model, 
                                         self.ARCH, 
                                         self.parser.get_train_size())
-
+        print(self.optimizer)
+        print(self.scheduler)
         if self.path is not None:
             torch.nn.Module.dump_patches = True
             w_dict = torch.load(path + "/SENet_valid_best",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
-            #             self.optimizer.load_state_dict(w_dict['optimizer'])
-            #             self.epoch = w_dict['epoch'] + 1
-            #             self.scheduler.load_state_dict(w_dict['scheduler'])
+            self.optimizer.load_state_dict(w_dict['optimizer'])
+            self.epoch = w_dict['epoch'] + 1
+            self.scheduler.load_state_dict(w_dict['scheduler'])
             print("dict epoch:", w_dict['epoch'])
             #             self.info = w_dict['info']
             print("info", w_dict['info'])
@@ -272,26 +281,26 @@ class Trainer():
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         if self.path is not None:
             acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
-                                             model=self.model,
-                                             criterion=self.criterion,
-                                             evaluator=self.evaluator,
-                                             class_func=self.parser.get_xentropy_class_string,
-                                             color_fn=self.parser.to_color,
-                                             save_scans=self.ARCH["train"]["save_scans"])
+                                                    model=self.model,
+                                                    criterion=self.criterion,
+                                                    evaluator=self.evaluator,
+                                                    class_func=self.parser.get_xentropy_class_string,
+                                                    color_fn=self.parser.to_color,
+                                                    save_scans=self.ARCH["train"]["save_scans"])
 
         # train for n epochs
         for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):
             # train for 1 epoch
 
             acc, iou, loss = self.train_epoch(train_loader=self.parser.get_train_set(),
-                                                           model=self.model,
-                                                           criterion=self.criterion,
-                                                           optimizer=self.optimizer,
-                                                           epoch=epoch,
-                                                           evaluator=self.evaluator,
-                                                           scheduler=self.scheduler,
-                                                           color_fn=self.parser.to_color,
-                                                           show_scans=self.ARCH["train"]["show_scans"])
+                                            model=self.model,
+                                            criterion=self.criterion,
+                                            optimizer=self.optimizer,
+                                            epoch=epoch,
+                                            evaluator=self.evaluator,
+                                            scheduler=self.scheduler,
+                                            color_fn=self.parser.to_color,
+                                            show_scans=self.ARCH["train"]["show_scans"])
 
 
             # update info
@@ -322,7 +331,7 @@ class Trainer():
             if epoch % self.ARCH["train"]["report_epoch"] == 0:
                 # evaluate on validation set
                 print("*" * 80)
-                acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+                acc, iou, loss, rand_img, iou_front = self.validate(val_loader=self.parser.get_valid_set(),
                                                          model=self.model,
                                                          criterion=self.criterion,
                                                          evaluator=self.evaluator,
@@ -334,6 +343,7 @@ class Trainer():
                 self.info["valid_loss"] = loss
                 self.info["valid_acc"] = acc
                 self.info["valid_iou"] = iou
+                self.info["valid_iou_front"] = iou_front
 
             # remember best iou and save checkpoint
             if self.info['valid_iou'] > self.info['best_val_iou']:
@@ -341,7 +351,7 @@ class Trainer():
                 print("Best mean iou in validation so far, save model!")
                 print("*" * 80)
                 self.info['best_val_iou'] = self.info['valid_iou']
-
+                self.info['best_val_iou_front'] = self.info['valid_iou_front']
                 # save the weights!
                 state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                          'optimizer': self.optimizer.state_dict(),
@@ -373,7 +383,7 @@ class Trainer():
         iou = AverageMeter()
         bd = AverageMeter()
         learning_rate = AverageMeter()
-
+        train=True
         # empty the cache to train now
         if self.gpu:
             torch.cuda.empty_cache()
@@ -385,7 +395,7 @@ class Trainer():
 
         end = time.time()
         for i, (proj_data, rgb_data) in tqdm(enumerate(train_loader), total=len(train_loader)):
-            in_vol, proj_mask, proj_labels = proj_data[0:3]
+            in_vol, proj_mask, proj_labels, query_mask = proj_data[0:4]
             # measure data loading time
             self.data_time_t.update(time.time() - end)
             if not self.multi_gpu and self.gpu:
@@ -394,13 +404,26 @@ class Trainer():
                 proj_labels = proj_labels.cuda()
                 proj_mask = proj_mask.cuda()
                 rgb_data = rgb_data.cuda()
+                query_mask = query_mask.cuda()
+                if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
+                    print("FUCKING SHITTTTTTTTTTTTTT")
             # compute output
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask, 
+                                                                          [proj_mask, None], 
+                                                                          proj_labels, 
+                                                                          training=train)
+                elif self.ARCH["train"]["pipeline"] == "fusion":
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
                                                                           proj_labels,
-                                                                          True)
+                                                                          training=train)
+                else:
+                    in_vol, _, proj_labels = self.range_preprocess(in_vol, 
+                                                                   [None, None], 
+                                                                   proj_labels,
+                                                                   False)
                 out = model(in_vol, rgb_data)
                 lamda = self.ARCH["train"]["lamda"]
 
@@ -498,12 +521,14 @@ class Trainer():
         wces = AverageMeter()
         acc = AverageMeter()
         iou = AverageMeter()
+        iou_front = AverageMeter()
         rand_imgs = []
-
+        train=False
         # switch to evaluate mode
         model.eval()
         evaluator.reset()
-
+        front_evaluator = iouEval(self.parser.get_n_classes(),
+                                    self.device, self.ignore_class)
         # empty the cache to infer in high res
         if self.gpu:
             torch.cuda.empty_cache()
@@ -511,17 +536,32 @@ class Trainer():
         with torch.no_grad():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
-                in_vol, proj_mask, proj_labels = proj_data[0:3]
+                in_vol, proj_mask, proj_labels, query_mask = proj_data[0:4]
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
+                    query_mask = query_mask.cuda()
                 if self.gpu:
                     proj_labels = proj_labels.cuda(non_blocking=True).long()
                 rgb_data = rgb_data.cuda()
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
-                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, proj_mask, proj_labels)
-                output = model(in_vol,rgb_data)
+                    in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
+                                                                          [proj_mask, None], 
+                                                                          proj_labels, 
+                                                                          training=train)
+                elif self.ARCH["train"]["pipeline"] == "fusion":
+                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                          [proj_mask, query_mask], 
+                                                                          proj_labels,
+                                                                          training=train)
+                else:
+                    in_vol, _, proj_labels = self.range_preprocess(in_vol, 
+                                                                   [None, None], 
+                                                                   proj_labels,
+                                                                   False)
+                with torch.cuda.amp.autocast():
+                    output = model(in_vol,rgb_data)
                 if self.ARCH["train"]["aux_loss"]:
                     output = output[0]
 
@@ -533,6 +573,7 @@ class Trainer():
                 # measure accuracy and record loss
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
+                front_evaluator.addBatch(argmax*query_mask, (proj_labels*query_mask).long())
                 losses.update(loss.mean().item(), in_vol.size(0))
                 jaccs.update(jacc.mean().item(),in_vol.size(0))
 
@@ -561,17 +602,22 @@ class Trainer():
             acc.update(accuracy.item(), in_vol.size(0))
             iou.update(jaccard.item(), in_vol.size(0))
 
+            f_accuracy = front_evaluator.getacc()
+            f_jaccard, f_class_jaccard = front_evaluator.getIoUMissingClass()
+            iou_front.update(f_jaccard.item(), in_vol.size(0))
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
                   'Loss avg {loss.avg:.4f}\n'
                   'Jaccard avg {jac.avg:.4f}\n'
                   'WCE avg {wces.avg:.4f}\n'
                   'Acc avg {acc.avg:.3f}\n'
-                  'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
-                                                 loss=losses,
-                                                 jac=jaccs,
-                                                 wces=wces,
-                                                 acc=acc, iou=iou))
+                  'IoU avg {iou.avg:.3f}\n'
+                  'Front IoU avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
+                                                            loss=losses,
+                                                            jac=jaccs,
+                                                            wces=wces,
+                                                            acc=acc, iou=iou,
+                                                            iou_front=iou_front))
 
             save_to_log(self.log, 'log.txt', 'Validation set:\n'
                                              'Time avg per batch {batch_time.avg:.3f}\n'
@@ -579,11 +625,13 @@ class Trainer():
                                              'Jaccard avg {jac.avg:.4f}\n'
                                              'WCE avg {wces.avg:.4f}\n'
                                              'Acc avg {acc.avg:.3f}\n'
-                                             'IoU avg {iou.avg:.3f}'.format(batch_time=self.batch_time_e,
-                                                                            loss=losses,
-                                                                            jac=jaccs,
-                                                                            wces=wces,
-                                                                            acc=acc, iou=iou))
+                                             'IoU avg {iou.avg:.3f}\n'
+                                             'Front IoU avg {iou_front.avg:.3f}'.format(batch_time=self.batch_time_e,
+                                                                                        loss=losses,
+                                                                                        jac=jaccs,
+                                                                                        wces=wces,
+                                                                                        acc=acc, iou=iou,
+                                                                                        iou_front=iou_front))
             # print also classwise
             for i, jacc in enumerate(class_jaccard):
                 print('IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
@@ -593,4 +641,4 @@ class Trainer():
                 self.info["valid_classes/" + class_func(i)] = jacc
 
 
-        return acc.avg, iou.avg, losses.avg, rand_imgs
+        return acc.avg, iou.avg, losses.avg, rand_imgs, iou_front.avg
