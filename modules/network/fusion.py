@@ -4,10 +4,10 @@ import math
 import torch
 import torch.nn as nn
 import fvcore.nn.weight_init as weight_init
-from Mask2Former_RGB import Backbone_RGB
 sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), 'modules'))
 sys.path.append(os.path.join(os.getcwd(), 'modules', 'network'))
+from Mask2Former_RGB import Backbone_RGB
 from position_encoding import PositionEmbeddingSine
 from overfit_test import overfit_test
 from torch.nn import functional as F
