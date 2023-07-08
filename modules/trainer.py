@@ -206,7 +206,7 @@ class Trainer():
         print(self.scheduler)
         if self.path is not None:
             torch.nn.Module.dump_patches = True
-            w_dict = torch.load(path + "/rangeshift_only",
+            w_dict = torch.load(path + "/SENet_valid_best",
                                 map_location=lambda storage, loc: storage)
             self.model.load_state_dict(w_dict['state_dict'], strict=True)
             self.optimizer.load_state_dict(w_dict['optimizer'])
@@ -478,6 +478,7 @@ class Trainer():
                 accuracy = evaluator.getacc()
                 jaccard, class_jaccard = evaluator.getIoUMissingClass()
                 #! IoU for camera FoV
+                query_mask = in_vol[:, 6, :, :].bool()
                 proj_labels_front = proj_labels * query_mask
                 if self.gpu:
                     proj_labels_front = proj_labels_front.cuda().long()
@@ -569,14 +570,12 @@ class Trainer():
             end = time.time()
             for i, (proj_data, rgb_data) in tqdm(enumerate(val_loader), total=len(val_loader)):
                 in_vol, proj_mask, proj_labels, query_mask = proj_data[0:4]
-                proj_labels_front = proj_labels * query_mask
                 if not self.multi_gpu and self.gpu:
                     in_vol = in_vol.cuda()
                     proj_mask = proj_mask.cuda()
                     query_mask = query_mask.cuda()
                 if self.gpu:
-                    proj_labels = proj_labels.cuda(non_blocking=True).long()
-                    proj_labels_front = proj_labels_front.cuda().long()
+                    proj_labels = proj_labels.cuda(non_blocking=True)
                 rgb_data = rgb_data.cuda()
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
@@ -607,6 +606,10 @@ class Trainer():
                 # measure accuracy and record loss
                 argmax = output.argmax(dim=1)
                 evaluator.addBatch(argmax, proj_labels)
+                query_mask = in_vol[:, 6, :, :].bool()
+                proj_labels_front = proj_labels * query_mask
+                if self.gpu:
+                    proj_labels_front = proj_labels_front.cuda()
                 front_evaluator.addBatch(argmax*query_mask, proj_labels_front)
                 losses.update(loss.mean().item(), in_vol.size(0))
                 jaccs.update(jacc.mean().item(),in_vol.size(0))

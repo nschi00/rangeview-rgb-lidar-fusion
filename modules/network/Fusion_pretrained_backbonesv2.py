@@ -70,12 +70,23 @@ class Fusion(nn.Module):
         """Lidar Backbone"""
         self.cenet = CENet(nclasses)
         w_dict = torch.load(
-            "logs/cenet_25_rangeaugs/SENet",
+            "logs/cenet_25_rangeaugs/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 
         for param in self.cenet.parameters():
             param.requires_grad = False
+
+        self.cenet.eval()
+
+        for module in self.cenet.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                if hasattr(module, 'weight'):
+                    module.weight.requires_grad_(False)
+                if hasattr(module, 'bias'):
+                    module.bias.requires_grad_(False)
+                module.eval()
+                module.track_running_stats = False
 
         # self.cenet.semantic_output = nn.Conv2d(128, 128, 1)
 
@@ -88,7 +99,7 @@ class Fusion(nn.Module):
         width = (512 // upscale // window_size + 1) * window_size
         self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width), Fusion_depths=self.Fusion_depths,
                     window_size=window_size, embed_dim=128, Fusion_num_heads=self.Fusion_num_heads,
-                    Re_num_heads=[8], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
+                    Re_num_heads=[8], Re_depths=[4], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
                     drop_path_rate=0.)
         
         self.bn_fusion = nn.BatchNorm2d(inplanes)
@@ -104,10 +115,17 @@ class Fusion(nn.Module):
         bs = lidar.shape[0]
 
         """Pre-trained Feature Extraction"""
-        lidar_out, x_lidar = self.cenet(lidar, rgb)
-        lidar_out = lidar_out[0]
-        x_lidar = self.bn_lidar(x_lidar)
-        x_lidar_fusion_list = self.bbox2(x_lidar * mask_front.unsqueeze(dim=1))
+        with torch.no_grad():
+            lidar_out, x_lidar = self.cenet(lidar, rgb)
+            lidar_out = lidar_out[0]
+
+        out = lidar_out.clone().detach()
+        lidar_features = x_lidar.clone().detach()
+
+        del x_lidar, lidar_out
+
+        lidar_features = self.bn_lidar(lidar_features)
+        x_lidar_fusion_list = self.bbox2(lidar_features * mask_front.unsqueeze(dim=1))
 
         x_lidar_fusion = []
         x_lidar_fusion_size = []
@@ -124,7 +142,7 @@ class Fusion(nn.Module):
         """Fusion Module"""
         fusion_out, _ = self.fusion_layer(x_lidar_fusion, x_rgb)
 
-        x_fusion = torch.zeros_like(x_lidar)
+        x_fusion = torch.zeros_like(lidar_features)
 
         for i in range(bs):
             current_fusion_out = F.interpolate(fusion_out[i].unsqueeze(0), size=x_lidar_fusion_size[i], mode='bilinear', align_corners=False)
@@ -133,11 +151,10 @@ class Fusion(nn.Module):
         x_fusion = self.bn_fusion(x_fusion)
         del x_lidar_fusion, fusion_out
 
-        mask_fusion = mask_front.unsqueeze(dim=1).repeat(1, lidar_out.shape[1], 1, 1)
+        mask_fusion = mask_front.unsqueeze(dim=1).repeat(1, out.shape[1], 1, 1)
         x_fusion = self.semantic_output(x_fusion)
-        lidar_out[mask_fusion] = x_fusion[mask_fusion].float()
-        out = F.softmax(lidar_out, dim=1)
-        del lidar_out
+        x_fusion = F.softmax(x_fusion, dim=1)
+        out[mask_fusion] = x_fusion[mask_fusion]
 
         return out
     
