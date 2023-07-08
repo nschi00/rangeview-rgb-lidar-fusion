@@ -6,7 +6,7 @@ import shutil
 from shutil import copyfile
 import yaml
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from modules.trainer import Trainer
 
 
