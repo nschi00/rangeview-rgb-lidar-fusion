@@ -121,7 +121,7 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        #self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0,0,0,0]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
@@ -148,7 +148,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                #self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                # self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
                 self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
                 
 
@@ -280,13 +280,21 @@ class Trainer():
                                  self.device, self.ignore_class)
         save_to_log(self.log, 'log.txt', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         if self.path is not None:
-            acc, iou, loss, rand_img = self.validate(val_loader=self.parser.get_valid_set(),
+            acc, iou, loss, rand_img,_ = self.validate(val_loader=self.parser.get_valid_set(),
                                                     model=self.model,
                                                     criterion=self.criterion,
                                                     evaluator=self.evaluator,
                                                     class_func=self.parser.get_xentropy_class_string,
                                                     color_fn=self.parser.to_color,
                                                     save_scans=self.ARCH["train"]["save_scans"])
+            
+            path = os.path.join(self.log, "valid-predictions")
+            for i, img in enumerate(rand_img):
+                if not os.path.isdir(path):
+                    os.makedirs(path)
+                img_path = os.path.join(path, str(i) + ".png")
+                cv2.imwrite(img_path, img)
+                
 
         # train for n epochs
         for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):

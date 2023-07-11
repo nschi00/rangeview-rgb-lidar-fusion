@@ -7,8 +7,19 @@ import torch.backends.cudnn as cudnn
 import time
 import os
 import numpy as np
+from tqdm import tqdm   
+from modules.network.fusion import Fusion, Fusion_2
+from modules.network.RangePreprocess import RangePreprocess
+from modules.network.ResNet import ResNet_34
+from modules.network.RangeFormer import RangeFormer
 from postproc.KNN import KNN
 
+def convert_relu_to_softplus(model, act):
+    for child_name, child in model.named_children():
+        if isinstance(child, nn.LeakyReLU):
+            setattr(model, child_name, act)
+        else:
+            convert_relu_to_softplus(child, act)
 
 class User():
   def __init__(self, ARCH, DATA, datadir, logdir, modeldir,split):
@@ -23,52 +34,32 @@ class User():
     # get the data
     from dataset.kitti.parser import Parser
     self.parser = Parser(root=self.datadir,
-                                      train_sequences=self.DATA["split"]["train"],
-                                      valid_sequences=self.DATA["split"]["valid"],
-                                      test_sequences=self.DATA["split"]["test"],
-                                      labels=self.DATA["labels"],
-                                      color_map=self.DATA["color_map"],
-                                      learning_map=self.DATA["learning_map"],
-                                      learning_map_inv=self.DATA["learning_map_inv"],
-                                      sensor=self.ARCH["dataset"]["sensor"],
-                                      max_points=self.ARCH["dataset"]["max_points"],
-                                      batch_size=1,
-                                      workers=self.ARCH["train"]["workers"],
-                                      gt=True,
-                                      shuffle_train=False)
+                        train_sequences=self.DATA["split"]["train"], # self.DATA["split"]["valid"] + self.DATA["split"]["train"] if finetune with valid
+                        valid_sequences=self.DATA["split"]["valid"],
+                        test_sequences=None,
+                        labels=self.DATA["labels"],
+                        color_map=self.DATA["color_map"],
+                        learning_map=self.DATA["learning_map"],
+                        learning_map_inv=self.DATA["learning_map_inv"],
+                        sensor=self.ARCH["dataset"]["sensor"],
+                        max_points=self.ARCH["dataset"]["max_points"],
+                        batch_size=1,
+                        workers=0,
+                        gt=True,
+                        shuffle_train=False)
 
     # concatenate the encoder and the head
     with torch.no_grad():
         torch.nn.Module.dump_patches = True
-        if self.ARCH["train"]["pipeline"] == "hardnet":
-            from modules.network.HarDNet import HarDNet
-            self.model = HarDNet(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
+        activation = eval("nn." + self.ARCH["train"]["act"] + "()")
         if self.ARCH["train"]["pipeline"] == "res":
-            from modules.network.ResNet import ResNet_34
             self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
-            def convert_relu_to_softplus(model, act):
-                for child_name, child in model.named_children():
-                    if isinstance(child, nn.LeakyReLU):
-                        setattr(model, child_name, act)
-                    else:
-                        convert_relu_to_softplus(child, act)
-
-            if self.ARCH["train"]["act"] == "Hardswish":
-                convert_relu_to_softplus(self.model, nn.Hardswish())
-            elif self.ARCH["train"]["act"] == "SiLU":
-                convert_relu_to_softplus(self.model, nn.SiLU())
-
-        if self.ARCH["train"]["pipeline"] == "fid":
-            from modules.network.Fid import ResNet_34
-            self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
-
-            if self.ARCH["train"]["act"] == "Hardswish":
-                convert_relu_to_softplus(self.model, nn.Hardswish())
-            elif self.ARCH["train"]["act"] == "SiLU":
-                convert_relu_to_softplus(self.model, nn.SiLU())
-
+            convert_relu_to_softplus(self.model, activation)
+        elif self.ARCH["train"]["pipeline"] == "rangeformer":
+            self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
+        elif self.ARCH["train"]["pipeline"] == "fusion":
+            self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+            #self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
 #     print(self.model)
     w_dict = torch.load(modeldir + "/SENet_valid_best",
                         map_location=lambda storage, loc: storage)
@@ -125,7 +116,7 @@ class User():
 
   def infer_subset(self, loader, to_orig_fn,cnn,knn):
     # switch to evaluate mode
-
+    self.range_preprocess = RangePreprocess([0,0,0,0])
     self.model.eval()
     total_time=0
     total_frames=0
@@ -134,8 +125,9 @@ class User():
       torch.cuda.empty_cache()
 
     with torch.no_grad():
-      for i, (proj_in, proj_mask, _, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints) in enumerate(loader):
+      for i, (proj_data, rgb_data) in tqdm(enumerate(loader), total=len(loader)):
         # first cut to rela size (batch size one allows it)
+        proj_in, proj_mask, _ ,query_mask, _, path_seq, path_name, p_x, p_y, proj_range, unproj_range, _, _, _, _, npoints= proj_data
         p_x = p_x[0, :npoints]
         p_y = p_y[0, :npoints]
         proj_range = proj_range[0, :npoints]
@@ -144,21 +136,40 @@ class User():
         path_name = path_name[0]
 
         if self.gpu:
-          proj_in = proj_in.cuda()
-          p_x = p_x.cuda()
-          p_y = p_y.cuda()
-          if self.post:
-            proj_range = proj_range.cuda()
-            unproj_range = unproj_range.cuda()
+            proj_in = proj_in.cuda()
+            p_x = p_x.cuda()
+            p_y = p_y.cuda()
+            proj_mask = proj_mask.cuda()
+            rgb_data = rgb_data.cuda()
+            query_mask = query_mask.cuda()
+            if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
+                print("FUCKING SHITTTTTTTTTTTTTT")
+            if self.post:
+                proj_range = proj_range.cuda()
+                unproj_range = unproj_range.cuda()
         end = time.time()
 
-        if self.ARCH["train"]["aux_loss"]:
-            with torch.cuda.amp.autocast(enabled=True):
-                [proj_output, x_2, x_3, x_4] = self.model(proj_in)
-        else:
-            with torch.cuda.amp.autocast(enabled=True):
-                proj_output = self.model(proj_in)
-
+        with torch.cuda.amp.autocast(enabled=True):
+            if self.ARCH["train"]["pipeline"] == "rangeformer":
+                proj_in, proj_mask, _= self.range_preprocess(proj_in, 
+                                                            [proj_mask, None], 
+                                                            _, 
+                                                            False)
+            elif self.ARCH["train"]["pipeline"] == "fusion":
+                proj_in, proj_mask, _ = self.range_preprocess(proj_in, 
+                                                            [proj_mask, query_mask], 
+                                                            _,
+                                                            False)
+            else:
+                proj_in, _, _ = self.range_preprocess(proj_in, 
+                                                    [None, None], 
+                                                    _,
+                                                    False)
+            proj_output = self.model(proj_in, rgb_data)
+        if type(proj_output) != list:
+            proj_output = [proj_output]
+        if proj_output[0].dim() == 4:
+            proj_output[0] = proj_output[0].squeeze(0)
         proj_argmax = proj_output[0].argmax(dim=0)
         if torch.cuda.is_available():
             torch.cuda.synchronize()

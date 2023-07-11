@@ -7,6 +7,7 @@ import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
+from collections import defaultdict
 from PIL import Image, ImageDraw
 from matplotlib import pyplot as plt
 import vispy
@@ -22,7 +23,13 @@ class LaserScan:
         self.proj_W = W
         self.proj_fov_up = fov_up
         self.proj_fov_down = fov_down
-        self.aug_prob = aug_prob
+        if aug_prob != None:
+            self.aug_prob = aug_prob
+        else:
+            self.aug_prob = defaultdict(lambda: -1.0)
+            self.aug_prob["point_dropping"] = [-1.0, -1.0]
+            self.aug_prob["flipped"] = False
+        self.rgb_size = (1024,384) # *(W,H): Dummy size to prevent error 
         self.reset()
 
     def reset(self):
@@ -65,13 +72,12 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename, rgb_data):
+    def open_scan(self, filename):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
         self.reset()
 
-        self.rgb_data = rgb_data
         self.filename = filename
 
         # check filename is string
@@ -387,8 +393,8 @@ class LaserScan:
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]
 
-        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_data._size[0])
-        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_data._size[1])
+        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_size[0])
+        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_size[1])
 
         combined_condition = condition_col1 & condition_col2 & mask_fov
 

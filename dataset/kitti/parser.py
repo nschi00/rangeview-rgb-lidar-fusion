@@ -118,9 +118,7 @@ class SemanticKitti(Dataset):
                                      TF.Resize((256, 768)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
-      self.aug_prob = defaultdict(lambda: -1.0)
-      self.aug_prob["point_dropping"] = [-1.0, -1.0]
-      self.aug_prob["flipped"] = False
+      self.aug_prob = None
       self.img_transform = TF.Compose([TF.ToTensor(),
                                      TF.Resize((256, 768)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
@@ -218,14 +216,27 @@ class SemanticKitti(Dataset):
                        aug_prob=self.aug_prob)
 
     # open and obtain scan
-    scan.open_scan(scan_file, rgb_data)
+    scan.rgb_size = rgb_data._size
+    scan.open_scan(scan_file)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
       scan.sem_label = self.map(scan.sem_label, self.learning_map)
       scan.proj_sem_label = self.map(scan.proj_sem_label, self.learning_map)
 
+    # make a tensor of the uncompressed data (with the max num points)
     unproj_n_points = scan.points.shape[0]
+    unproj_xyz = torch.full((self.max_points, 3), -1.0, dtype=torch.float)
+    unproj_xyz[:unproj_n_points] = torch.from_numpy(scan.points)
+    unproj_range = torch.full([self.max_points], -1.0, dtype=torch.float)
+    unproj_range[:unproj_n_points] = torch.from_numpy(scan.unproj_range)
+    unproj_remissions = torch.full([self.max_points], -1.0, dtype=torch.float)
+    unproj_remissions[:unproj_n_points] = torch.from_numpy(scan.remissions)
+    if self.gt:
+      unproj_labels = torch.full([self.max_points], -1.0, dtype=torch.int32)
+      unproj_labels[:unproj_n_points] = torch.from_numpy(scan.sem_label)
+    else:
+      unproj_labels = []
 
     # get points and labels
     proj_range = torch.from_numpy(scan.proj_range).clone()
@@ -273,13 +284,20 @@ class SemanticKitti(Dataset):
                       proj_mask, 
                       proj_labels,
                       query_mask, 
+                      unproj_labels, 
                       path_seq, 
                       path_name, 
-                      proj_idx]
-    
+                      proj_x, 
+                      proj_y, 
+                      proj_range, 
+                      unproj_range, 
+                      proj_xyz, 
+                      unproj_xyz, 
+                      proj_remission, 
+                      unproj_remissions, 
+                      unproj_n_points]
     rgb_data = self.img_transform(rgb_data)
-    
-    if self.aug_prob["flipped"]:
+    if scan.aug_prob["flipped"]:
       rgb_data = self.flip(rgb_data)
     
     # * VISUALIZATION IF NEEDED
