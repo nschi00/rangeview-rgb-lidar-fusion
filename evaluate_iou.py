@@ -86,28 +86,40 @@ def eval(test_sequences,splits,pred):
         pred = SemLaserScan(project=False)
         pred.open_scan(scan_file)
         pred.open_label(pred_file)
+        front_points = pred.point_idx_camera_fov
         u_pred_sem = remap_lut[pred.sem_label]  # remap to xentropy format
         if FLAGS.limit is not None:
             u_pred_sem = u_pred_sem[:FLAGS.limit]
 
         # add single scan to evaluation
         evaluator.addBatch(u_pred_sem, u_label_sem)
+        front_evaluator.addBatch(u_pred_sem[front_points], u_label_sem[front_points])
 
     # when I am done, print the evaluation
     m_accuracy = evaluator.getacc()
     m_jaccard, class_jaccard = evaluator.getIoU()
+    m_accuracy_front = front_evaluator.getacc()
+    m_jaccard_front, class_jaccard_front = front_evaluator.getIoU()
 
     print('{split} set:\n'
           'Acc avg {m_accuracy:.3f}\n'
-          'IoU avg {m_jaccard:.3f}'.format(split=splits,
+          'IoU avg {m_jaccard:.3f}\n'
+          'Acc front avg {m_accuracy_front:.3f}\n'
+          'IoU front avg {m_jaccard_front:.3f}'.format(split=splits,
                                            m_accuracy=m_accuracy,
-                                           m_jaccard=m_jaccard))
+                                           m_jaccard=m_jaccard,
+                                           m_accuracy_front=m_accuracy_front,
+                                           m_jaccard_front=m_jaccard_front))
 
     save_to_log(FLAGS.predictions,'pred.txt','{split} set:\n'
           'Acc avg {m_accuracy:.3f}\n'
-          'IoU avg {m_jaccard:.3f}'.format(split=splits,
+          'IoU avg {m_jaccard:.3f}\n'
+          'Acc front avg {m_accuracy_front:.3f}\n'
+          'IoU front avg {m_jaccard_front:.3f}'.format(split=splits,
                                            m_accuracy=m_accuracy,
-                                           m_jaccard=m_jaccard))
+                                           m_jaccard=m_jaccard,
+                                           m_accuracy_front=m_accuracy_front,
+                                           m_jaccard_front=m_jaccard_front))
     # print also classwise
     for i, jacc in enumerate(class_jaccard):
         if i not in ignore:
@@ -115,10 +127,17 @@ def eval(test_sequences,splits,pred):
                 i=i, class_str=class_strings[class_inv_remap[i]], jacc=jacc))
             save_to_log(FLAGS.predictions, 'pred.txt', 'IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
                 i=i, class_str=class_strings[class_inv_remap[i]], jacc=jacc))
+            
+    for i, jacc in enumerate(class_jaccard_front):
+        if i not in ignore:
+            print('IoU front class {i:} [{class_str:}] = {jacc:.3f}'.format(
+                i=i, class_str=class_strings[class_inv_remap[i]], jacc=jacc))
+            save_to_log(FLAGS.predictions, 'pred.txt', 'IoU front class {i:} [{class_str:}] = {jacc:.3f}'.format(
+                i=i, class_str=class_strings[class_inv_remap[i]], jacc=jacc))
 
     # print for spreadsheet
     print("*" * 80)
-    print("below can be copied straight for paper table")
+    print("IoU below can be copied straight for paper table")
     for i, jacc in enumerate(class_jaccard):
         if i not in ignore:
             sys.stdout.write('{jacc:.3f}'.format(jacc=jacc.item()))
@@ -128,6 +147,21 @@ def eval(test_sequences,splits,pred):
     sys.stdout.write('{acc:.3f}'.format(acc=m_accuracy.item()))
     sys.stdout.write('\n')
     sys.stdout.flush()
+
+    print("*" * 80)
+    print("IoU front below can be copied straight for paper table")
+    for i, jacc in enumerate(class_jaccard_front):
+        if i not in ignore:
+            sys.stdout.write('{jacc:.3f}'.format(jacc=jacc.item()))
+            sys.stdout.write(",")
+    sys.stdout.write('{jacc:.3f}'.format(jacc=m_jaccard_front.item()))
+    sys.stdout.write(",")
+    sys.stdout.write('{acc:.3f}'.format(acc=m_accuracy_front.item()))
+    sys.stdout.write('\n')
+    sys.stdout.flush()
+
+    print(evaluator.conf_matrix)
+    print(front_evaluator.conf_matrix)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("./evaluate_iou.py")
@@ -233,7 +267,9 @@ if __name__ == '__main__':
     # create evaluator
     device = torch.device("cpu")
     evaluator = iouEval(nr_classes, device, ignore)
+    front_evaluator = iouEval(nr_classes, device, ignore)
     evaluator.reset()
+    front_evaluator.reset()
 
     # get test set
     if FLAGS.split is None:

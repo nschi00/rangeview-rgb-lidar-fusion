@@ -29,7 +29,7 @@ class LaserScan:
             self.aug_prob = defaultdict(lambda: -1.0)
             self.aug_prob["point_dropping"] = [-1.0, -1.0]
             self.aug_prob["flipped"] = False
-        self.rgb_size = (1024,384) # *(W,H): Dummy size to prevent error 
+        self.rgb_size = (1240, 376) # *(W,H): Dummy size to prevent error 
         self.reset()
 
     def reset(self):
@@ -140,7 +140,6 @@ class LaserScan:
         if random.random() < self.aug_prob["jittering"]:
             self.RandomJittering()
         if random.random() < self.aug_prob["flipping"]:
-            self.aug_prob["flipped"] = True
             self.RandomFlipping(mode=self.aug_prob["type"])
             self.flag_flip = True
 

@@ -16,22 +16,22 @@ if __name__ == '__main__':
     parser.add_argument(
         '--dataset', '-d',
         type=str,
-        required=False,
-        default='../SemanticKITTI/dataset',
+        required=True,
+        default=None,
         help='Dataset to train with. No Default',
     )
     parser.add_argument(
         '--log', '-l',
         type=str,
-        required=False,
-        default="logs/fusion_without",
+        required=True,
+        default=None,
         help='Directory to put the predictions. Default: ~/logs/date+time'
     )
     parser.add_argument(
         '--model', '-m',
         type=str,
-        required=False,
-        default="logs/fusion_best_rangeaug",
+        required=True,
+        default=None,
         help='Directory to get the trained model.'
     )
     parser.add_argument(

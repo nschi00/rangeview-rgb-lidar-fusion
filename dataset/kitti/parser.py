@@ -299,8 +299,7 @@ class SemanticKitti(Dataset):
     rgb_data = self.img_transform(rgb_data)
 
     if scan.flag_flip:
-      rgb_flip = TF.RandomHorizontalFlip(p=1.0)
-      rgb_data = rgb_flip(rgb_data)
+      rgb_data = self.flip(rgb_data)
 
     # return
     return projected_data, rgb_data

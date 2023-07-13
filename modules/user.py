@@ -8,9 +8,10 @@ import time
 import os
 import numpy as np
 from tqdm import tqdm   
-from modules.network.fusion import Fusion, Fusion_2
+from modules.network.Fusion_pretrained_backbonesv2 import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
+from modules.network.new_cenet import CENet
 from modules.network.RangeFormer import RangeFormer
 from postproc.KNN import KNN
 
@@ -53,7 +54,7 @@ class User():
         torch.nn.Module.dump_patches = True
         activation = eval("nn." + self.ARCH["train"]["act"] + "()")
         if self.ARCH["train"]["pipeline"] == "res":
-            self.model = ResNet_34(self.parser.get_n_classes(), self.ARCH["train"]["aux_loss"])
+            self.model = CENet(self.parser.get_n_classes())
             convert_relu_to_softplus(self.model, activation)
         elif self.ARCH["train"]["pipeline"] == "rangeformer":
             self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
