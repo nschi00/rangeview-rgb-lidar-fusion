@@ -17,7 +17,7 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+from modules.network.Fusion_seganything import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer

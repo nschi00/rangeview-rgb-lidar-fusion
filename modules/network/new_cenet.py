@@ -20,19 +20,18 @@ class CENet(nn.Module):
         self.lidar_model = ResNet_34(n_classes, aux=True)
         self.feat_3d_red = BasicConv2d(256, d_model, kernel_size=3, padding=1)
         self.prediction = BasicConv2d(d_model, n_classes, kernel_size=1, padding=0)
-        print("Fusion model initialized")
         
     def forward(self, lidar, rgb):
 
         # with torch.no_grad():
         B, _, H, W = lidar.shape
         lidar_out = self.lidar_model(lidar, rgb)
-        lidar_feature = self.lidar_model.feature_3D
-        lidar_feature = self.feat_3d_red(lidar_feature)
+        lidar_feature_high_dim = self.lidar_model.feature_3D
+        lidar_feature = self.feat_3d_red(lidar_feature_high_dim)
         
         fused_pred = F.softmax(self.prediction(lidar_feature), dim=1)
         out = [fused_pred] + lidar_out
-        return out, lidar_feature
+        return out, lidar_feature_high_dim
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
