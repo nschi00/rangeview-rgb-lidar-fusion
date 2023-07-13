@@ -104,23 +104,23 @@ class SemanticKitti(Dataset):
                         "point_dropping": [0.9, 0.1],
                         "type": "new"}
         
-      self.img_aug_prob = {"scaling": 0.0,
-                           "C_jittering": 0.5,
-                           "H_flip": 0.5,
-                           "V_flip": 0.5,}
+      self.img_aug_prob = {"scaling": 0.,
+                           "C_jittering": 0.,
+                           "H_flip": 0.,
+                           "V_flip": 0.,}
                            
       ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
       self.flip = TF.RandomHorizontalFlip(p=1.0)
       self.img_transform = TF.Compose([TF.ToTensor(),
-                                      # ColorJitter,
-                                      # TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
-                                      # TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
-                                     TF.Resize((256, 768)),
+                                      ColorJitter,
+                                      TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
+                                      TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
+                                     TF.Resize((376, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
       self.aug_prob = None
       self.img_transform = TF.Compose([TF.ToTensor(),
-                                     TF.Resize((256, 768)),
+                                     TF.Resize((376, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     
     # get number of classes (can't be len(self.learning_map) because there
@@ -297,14 +297,11 @@ class SemanticKitti(Dataset):
                       unproj_remissions, 
                       unproj_n_points]
     rgb_data = self.img_transform(rgb_data)
-    if scan.aug_prob["flipped"]:
-      rgb_data = self.flip(rgb_data)
-    
-    # * VISUALIZATION IF NEEDED
-    # fig, (ax1, ax2) = plt.subplots(1, 2)
-    # ax1.imshow(rgb_data.permute(1, 2, 0))
-    # ax2.imshow(scan.proj_sem_label)
-    # plt.show()
+
+    if scan.flag_flip:
+      rgb_flip = TF.RandomHorizontalFlip(p=1.0)
+      rgb_data = rgb_flip(rgb_data)
+
     # return
     return projected_data, rgb_data
 

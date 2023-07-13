@@ -47,17 +47,26 @@ class RangePreprocess():
         if not training:
             if query_masks != None:
                 data = torch.cat([data, query_masks.unsqueeze(1)], dim=1)
-            if type(mask) == list:
-                return data, mask[0], label.long()
-            return data, mask, label.long()
+                proj_mask = mask[0]
+            return data, proj_mask, label.long()
         bs = data.shape[0]
-        assert bs > 2, "Batch size should be larger than 2"
+        if torch.any(torch.Tensor(self.aug_prob) != 0):
+            assert bs > 2, "Batch size should be larger than 2"
         out_scan = []
         out_label = []
         query_masks_out = []
         match_dict = match_elements(bs)
         for i in range(bs):
-            j = match_dict[i]
+            # if bs > 2:
+            #     j = random.randint(0, bs-1)
+            #     while j == i or matched_dict[j] == i:
+            #         j = random.randint(0, bs-1)
+            #     matched_dict[i] = j
+            # elif bs == 2:
+            #     j = 1 if i == 0 else 0
+            # else:
+            j = i
+                
             scan_a, scan_b = data[i].clone(), data[j]
             label_a, label_b = label[i].clone(), label[j]
             query_mask = query_masks[i].clone() if query_masks != None else None

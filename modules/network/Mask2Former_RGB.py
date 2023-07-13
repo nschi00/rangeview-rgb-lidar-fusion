@@ -13,7 +13,7 @@ class Backbone_RGB(nn.Module):
     def __init__(self, nclasses, aux=False):
         super(Backbone_RGB, self).__init__()
 
-        weight = "mask2former/models--facebook--mask2former-swin-tiny-cityscapes-semantic/snapshots/414e5f2219df2e2e56703b856bbce4cc7b7046b9"
+        weight = "logs/lidar_front_25_rgb_mask2former_retrainTransPixDec_rgbfullsizeNormalize_noDropPoints/models--facebook--mask2former-swin-tiny-cityscapes-semantic/snapshots/414e5f2219df2e2e56703b856bbce4cc7b7046b9"
 
         self.backbone = Mask2FormerForUniversalSegmentation.from_pretrained(weight)
 

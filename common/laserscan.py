@@ -10,8 +10,8 @@ import cv2
 from collections import defaultdict
 from PIL import Image, ImageDraw
 from matplotlib import pyplot as plt
-import vispy
-from vispy.scene import visuals, SceneCanvas
+# import vispy
+# from vispy.scene import visuals, SceneCanvas
 
 class LaserScan:
     """Class that contains LaserScan with x,y,z,r"""
@@ -97,9 +97,6 @@ class LaserScan:
         points = scan[:, 0:3]  # get xyz
         remissions = scan[:, 3]  # get remission
 
-        
-        # self.point_idx_camera_fov = np.argwhere(mask_camera_fov == True).squeeze(1)
-
         if random.random() < self.aug_prob["point_dropping"][0]:
             if self.aug_prob["type"] == "new":
                 self.drop_points = random.uniform(0.0, self.aug_prob["point_dropping"][1])
@@ -110,7 +107,7 @@ class LaserScan:
             remissions = np.delete(remissions,self.points_to_drop)
         else:
             self.drop_points = False
-            
+
         fov_hor = [-90, 90]
         fov_vert = [-90, 90]
         mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
@@ -131,7 +128,9 @@ class LaserScan:
         # check remission makes sense
         if remissions is not None and not isinstance(remissions, np.ndarray):
             raise TypeError("Remissions should be numpy array")
-        self.aug_prob["flipped"] = False
+        
+        self.flag_flip = False
+
         # put in attribute
         self.points = points  # get
         if random.random() < self.aug_prob["scaling"]:
@@ -143,6 +142,7 @@ class LaserScan:
         if random.random() < self.aug_prob["flipping"]:
             self.aug_prob["flipped"] = True
             self.RandomFlipping(mode=self.aug_prob["type"])
+            self.flag_flip = True
 
         if remissions is not None:
             self.remissions = remissions  # get remission
@@ -446,83 +446,83 @@ class LaserScan:
 
         return color_range.reshape(256, 3).astype(np.float32) / 255.0
     
-    def start_visualization(self, indices, title):
-        self.action = "no"  # no, next, back, quit are the possibilities
-        self.indices = indices
-        self.viz_title = title
+    # def start_visualization(self, indices, title):
+    #     self.action = "no"  # no, next, back, quit are the possibilities
+    #     self.indices = indices
+    #     self.viz_title = title
 
-        # new canvas prepared for visualizing data
-        self.canvas = SceneCanvas(keys='interactive', show=True)
-        # interface (n next, b back, q quit, very simple)
-        self.canvas.events.key_press.connect(self.key_press)
-        self.canvas.events.draw.connect(self.draw)
-        # grid
-        self.grid = self.canvas.central_widget.add_grid()
+    #     # new canvas prepared for visualizing data
+    #     self.canvas = SceneCanvas(keys='interactive', show=True)
+    #     # interface (n next, b back, q quit, very simple)
+    #     self.canvas.events.key_press.connect(self.key_press)
+    #     self.canvas.events.draw.connect(self.draw)
+    #     # grid
+    #     self.grid = self.canvas.central_widget.add_grid()
 
-        # laserscan part
-        self.scan_view = vispy.scene.widgets.ViewBox(
-            border_color='white', parent=self.canvas.scene)
-        self.grid.add_widget(self.scan_view, 0, 0)
-        self.scan_vis = visuals.Markers()
-        self.scan_view.camera = 'turntable'
-        self.scan_view.add(self.scan_vis)
-        visuals.XYZAxis(parent=self.scan_view.scene)
+    #     # laserscan part
+    #     self.scan_view = vispy.scene.widgets.ViewBox(
+    #         border_color='white', parent=self.canvas.scene)
+    #     self.grid.add_widget(self.scan_view, 0, 0)
+    #     self.scan_vis = visuals.Markers()
+    #     self.scan_view.camera = 'turntable'
+    #     self.scan_view.add(self.scan_vis)
+    #     visuals.XYZAxis(parent=self.scan_view.scene)
 
-        self.update_scan()
-        self.run()
+    #     self.update_scan()
+    #     self.run()
 
-    def update_scan(self):
-        # then change names
-        title = self.viz_title
-        self.canvas.title = title
+    # def update_scan(self):
+    #     # then change names
+    #     title = self.viz_title
+    #     self.canvas.title = title
 
-        # plot scan
-        power = 16
-        # print()
-        range_data = np.copy(self.unproj_range[self.indices])
-        # range_data = np.copy(self.unproj_range)
-        # print(range_data.max(), range_data.min())
-        range_data = range_data**(1 / power)
-        # print(range_data.max(), range_data.min())
-        viridis_range = ((range_data - range_data.min()) /
-                        (range_data.max() - range_data.min()) *
-                        255).astype(np.uint8)
-        viridis_map = self.get_mpl_colormap("viridis")
-        viridis_colors = viridis_map[viridis_range]
-        self.scan_vis.set_data(self.points[self.indices],
-                                face_color=viridis_colors[..., ::-1],
-                                edge_color=viridis_colors[..., ::-1],
-                                size=1)
+    #     # plot scan
+    #     power = 16
+    #     # print()
+    #     range_data = np.copy(self.unproj_range[self.indices])
+    #     # range_data = np.copy(self.unproj_range)
+    #     # print(range_data.max(), range_data.min())
+    #     range_data = range_data**(1 / power)
+    #     # print(range_data.max(), range_data.min())
+    #     viridis_range = ((range_data - range_data.min()) /
+    #                     (range_data.max() - range_data.min()) *
+    #                     255).astype(np.uint8)
+    #     viridis_map = self.get_mpl_colormap("viridis")
+    #     viridis_colors = viridis_map[viridis_range]
+    #     self.scan_vis.set_data(self.points[self.indices],
+    #                             face_color=viridis_colors[..., ::-1],
+    #                             edge_color=viridis_colors[..., ::-1],
+    #                             size=1)
 
-      # interface
-    def key_press(self, event):
-        self.canvas.events.key_press.block()
-        if event.key == 'N':
-            self.offset += 1
-            if self.offset >= self.total:
-                self.offset = 0
-            self.update_scan()
-        elif event.key == 'B':
-            self.offset -= 1
-            if self.offset < 0:
-                self.offset = self.total - 1
-            self.update_scan()
-        elif event.key == 'Q' or event.key == 'Escape':
-            self.destroy()
+    #   # interface
+    # def key_press(self, event):
+    #     self.canvas.events.key_press.block()
+    #     if event.key == 'N':
+    #         self.offset += 1
+    #         if self.offset >= self.total:
+    #             self.offset = 0
+    #         self.update_scan()
+    #     elif event.key == 'B':
+    #         self.offset -= 1
+    #         if self.offset < 0:
+    #             self.offset = self.total - 1
+    #         self.update_scan()
+    #     elif event.key == 'Q' or event.key == 'Escape':
+    #         self.destroy()
 
-    def draw(self, event):
-        if self.canvas.events.key_press.blocked():
-            self.canvas.events.key_press.unblock()
+    # def draw(self, event):
+    #     if self.canvas.events.key_press.blocked():
+    #         self.canvas.events.key_press.unblock()
 
-    def destroy(self):
-        # destroy the visualization
-        self.canvas.close()
-        if self.images:
-            self.img_canvas.close()
-        vispy.app.quit()
+    # def destroy(self):
+    #     # destroy the visualization
+    #     self.canvas.close()
+    #     if self.images:
+    #         self.img_canvas.close()
+    #     vispy.app.quit()
 
-    def run(self):
-        vispy.app.run()
+    # def run(self):
+    #     vispy.app.run()
 
 class SemLaserScan(LaserScan):
     """Class that contains LaserScan with x,y,z,r,sem_label,sem_color_label,inst_label,inst_color_label"""
