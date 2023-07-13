@@ -31,7 +31,7 @@ if __name__ == '__main__':
         '--dataset', '-d',
         type=str,
         required=False,
-        default='../SemanticKITTI/dataset',
+        default='../SemanticKITTI/dataset', #/raid/s3/ks_temp/dataset/
         help='Dataset to train with. No Default',
     )
     parser.add_argument(

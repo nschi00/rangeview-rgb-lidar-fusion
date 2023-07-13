@@ -164,6 +164,7 @@ class Trainer():
         print("Number of workers: ", self.ARCH["train"]["workers"])
         print("Batch size: ", self.ARCH["train"]["batch_size"])
         print("Subset ratio: ", self.ARCH["train"]["subset_ratio"])
+        print("RangeAug prob: ", self.range_preprocess.aug_prob)
 
         save_to_log(self.log, 'model.txt', "Number of parameters: %.5f M" %(pytorch_total_params/1000000))
         self.tb_logger = SummaryWriter(log_dir=self.log, flush_secs=20)
@@ -295,6 +296,14 @@ class Trainer():
                                                     class_func=self.parser.get_xentropy_class_string,
                                                     color_fn=self.parser.to_color,
                                                     save_scans=self.ARCH["train"]["save_scans"])
+            
+            path = os.path.join(self.log, "valid-predictions")
+            for i, img in enumerate(rand_img):
+                if not os.path.isdir(path):
+                    os.makedirs(path)
+                img_path = os.path.join(path, str(i) + ".png")
+                cv2.imwrite(img_path, img)
+                
 
         # train for n epochs
         for epoch in range(self.epoch, self.ARCH["train"]["max_epochs"]):
@@ -367,7 +376,7 @@ class Trainer():
                 print("Best mean iou in validation so far, save model!")
                 print("*" * 80)
                 self.info['best_val_iou'] = self.info['valid_iou']
-
+                self.info['best_val_iou_front'] = self.info['valid_iou_front']
                 # save the weights!
                 state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
                          'optimizer': self.optimizer.state_dict(),
@@ -433,7 +442,7 @@ class Trainer():
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask, 
+                                                                          [proj_mask, None], 
                                                                           proj_labels, 
                                                                           training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
@@ -443,7 +452,7 @@ class Trainer():
                                                                           training=train)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
-                                                                   None, 
+                                                                   [None, None], 
                                                                    proj_labels,
                                                                    False)
                 out = model(in_vol, rgb_data)
@@ -580,7 +589,7 @@ class Trainer():
                 # compute output
                 if self.ARCH["train"]["pipeline"] == "rangeformer":
                     in_vol, proj_mask, proj_labels= self.range_preprocess(in_vol, 
-                                                                          proj_mask, 
+                                                                          [proj_mask, None], 
                                                                           proj_labels, 
                                                                           training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
@@ -590,7 +599,7 @@ class Trainer():
                                                                           training=train)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
-                                                                   None, 
+                                                                   [None, None], 
                                                                    proj_labels,
                                                                    False)
                 with torch.cuda.amp.autocast():
@@ -642,6 +651,9 @@ class Trainer():
             iou.update(jaccard.item(), in_vol.size(0))
             iou_front.update(jaccard_front.item(), in_vol.size(0))
 
+            f_accuracy = front_evaluator.getacc()
+            f_jaccard, f_class_jaccard = front_evaluator.getIoUMissingClass()
+            iou_front.update(f_jaccard.item(), in_vol.size(0))
             print('Validation set:\n'
                   'Time avg per batch {batch_time.avg:.3f}\n'
                   'Loss avg {loss.avg:.4f}\n'
@@ -681,5 +693,4 @@ class Trainer():
                 save_to_log(self.log, 'log.txt', 'Front IoU class {i:} [{class_str:}] = {jacc:.3f}'.format(
                     i=i, class_str=class_func(i), jacc=jacc))
                 self.info["valid_classes_front/" + class_func(i)] = jacc
-
         return acc.avg, iou.avg, losses.avg, rand_imgs, iou_front.avg

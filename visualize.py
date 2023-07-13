@@ -79,9 +79,6 @@ if __name__ == '__main__':
     if FLAGS.what == "kitti":
         from common.laserscan import LaserScan, SemLaserScan
         from common.laserscanvis import LaserScanVis
-    elif FLAGS.what == "poss":
-        from common.posslaserscan import LaserScan, SemLaserScan
-        from common.posslaserscanvis import LaserScanVis
     else:
         raise TypeError("This type dataset doesn't exist (use kitti or poss)! Exiting...")
     # open config file

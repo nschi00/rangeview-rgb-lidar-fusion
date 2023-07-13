@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from overfit_test import overfit_test
 
 from transformers import Mask2FormerForUniversalSegmentation
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import List, Optional, Tuple
     
 
 class Backbone_RGB(nn.Module):

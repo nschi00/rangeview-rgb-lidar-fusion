@@ -1,6 +1,28 @@
 import torch
-from collections import defaultdict
 import random
+
+def match_elements(n):
+    list1 = list(range(n))
+    finished = False
+    while not finished:
+        try:
+            list2 = list1.copy()
+            random.shuffle(list2)
+            matches = {}
+            not_allowed = set()
+            for i in range(n):
+                current_element = list1[i]
+                for j in range(n):
+                    if list2[j] != current_element and (current_element, list2[j]) not in not_allowed:
+                        matches[current_element] = list2[j]
+                        not_allowed.add((list2[j], current_element))
+                        del list2[j]
+                        break
+            finished = True
+        except:
+            finished = False
+
+    return matches
 
 class RangePreprocess():
     def __init__(self, aug_prob = None) -> None:
@@ -9,14 +31,18 @@ class RangePreprocess():
         else:
             self.aug_prob = aug_prob
     
-    def __call__(self, data, mask, label, training=False):
-        if type(mask) == list:
-            data = torch.cat([data, mask[0].unsqueeze(1)], dim=1)
-            query_masks = mask[1]
-        else:
-            if mask is not None:
+    def __call__(self, data, masks: list, label, training=False):
+        if self.aug_prob == [0., 0., 0., 0.]:
+            training = False
+        if not training:
+            for mask in masks:
+                if mask is None:
+                    continue
                 data = torch.cat([data, mask.unsqueeze(1)], dim=1)
-            query_masks = None
+            return data, masks[0], label.long()
+        
+        data = torch.cat([data, masks[0].unsqueeze(1)], dim=1)
+        query_masks = masks[1]
             
         if not training:
             if query_masks != None:
@@ -29,7 +55,7 @@ class RangePreprocess():
         out_scan = []
         out_label = []
         query_masks_out = []
-        matched_dict = defaultdict(lambda: -1)
+        match_dict = match_elements(bs)
         for i in range(bs):
             # if bs > 2:
             #     j = random.randint(0, bs-1)

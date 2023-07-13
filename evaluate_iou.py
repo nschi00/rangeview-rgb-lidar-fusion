@@ -134,15 +134,15 @@ if __name__ == '__main__':
     parser.add_argument(
         '--dataset', '-d',
         type=str,
-        required=True,
-        default=None,
+        required=False,
+        default="../SemanticKITTI/dataset",
         help='Dataset dir. No Default',
     )
     parser.add_argument(
         '--predictions', '-p',
         type=str,
-        required=True,
-        default=None,
+        required=False,
+        default="logs/fusion_without",
         help='Prediction dir. Same organization as dataset, but predictions in'
              'each sequences "prediction" directory. No Default. If no option is set'
              ' we look for the labels in the same directory as dataset'
