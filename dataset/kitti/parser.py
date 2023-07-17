@@ -90,10 +90,10 @@ class SemanticKitti(Dataset):
     if self.transform:
       if old_aug:
         self.aug_prob = {"scaling": 0.0,
-                         "rotation": 0.5,
-                         "jittering": 0.5,
+                         "rotation": 0.0,
+                         "jittering": 0.0,
                          "flipping": 0.5,
-                         "point_dropping": [0.5, 0.5],
+                         "point_dropping": [-1., -1.],
                          "type": "old"}
       else:
         self.aug_prob = {"scaling": 1.0,
@@ -112,12 +112,12 @@ class SemanticKitti(Dataset):
       self.img_transform = TF.Compose([ColorJitter,
                                       TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
                                       TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
-                                     TF.Resize((140, 620)),
+                                     TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
       self.aug_prob = defaultdict(lambda: -1.0)
       self.aug_prob["point_dropping"] = [-1.0, -1.0]
-      self.img_transform = TF.Compose([TF.Resize((140, 620)),
+      self.img_transform = TF.Compose([TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
       
     self.img_to_tensor = TF.ToTensor()

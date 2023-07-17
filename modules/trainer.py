@@ -17,7 +17,8 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.Fusion_seganything import Fusion
+# from modules.network.Fusion_seganything import Fusion
+from modules.network.Mask2Former_RGB import Backbone_RGB
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -155,7 +156,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                self.model = Backbone_RGB(self.parser.get_n_classes())
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
@@ -440,7 +441,7 @@ class Trainer():
                     in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,
-                                                                          training=train)
+                                                                          training=False)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
                                                                    None, 

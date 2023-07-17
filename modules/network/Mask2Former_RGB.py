@@ -13,7 +13,7 @@ class Backbone_RGB(nn.Module):
     def __init__(self, nclasses, aux=False):
         super(Backbone_RGB, self).__init__()
 
-        weight = "logs/lidar_front_25_rgb_mask2former_retrainTransPixDec_rgbfullsizeNormalize_noDropPoints/models--facebook--mask2former-swin-tiny-cityscapes-semantic/snapshots/414e5f2219df2e2e56703b856bbce4cc7b7046b9"
+        weight = "facebook/mask2former-swin-large-cityscapes-semantic"
 
         self.backbone = Mask2FormerForUniversalSegmentation.from_pretrained(weight)
 
@@ -23,6 +23,8 @@ class Backbone_RGB(nn.Module):
         self.backbone.class_predictor = nn.Linear(256, nclasses)
 
     def forward(self, lidar, x):
+
+        lidar, _, mask_front = lidar[:, :5, :, :], lidar[:, 5, :, :].bool(), lidar[:, 6, :, :].bool()
 
         target_size = lidar.shape[2:4]
         bs = lidar.shape[0]
