@@ -51,7 +51,7 @@ class Fusion(nn.Module):
         self.rgb_backbone = Backbone_RGB(nclasses)
 
         w_dict = torch.load(
-            "logs/lidar_front_25_rgb_mask2former_retrainTransPixDec_rgbfullsizeNormalize_noDropPoints/SENet_valid_best",
+            "logs/mask2former_rgb_samelidarview_flip_100/SENet_valid_best",
             map_location=lambda storage, loc: storage)
 
         self.rgb_backbone.load_state_dict(w_dict['state_dict'], strict=True)
@@ -66,11 +66,19 @@ class Fusion(nn.Module):
 
         self.bn_rgb = nn.BatchNorm2d(inplanes)
 
+        for module in self.rgb_backbone.backbone.model.pixel_level_module.encoder.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                if hasattr(module, 'weight'):
+                    module.weight.requires_grad_(False)
+                if hasattr(module, 'bias'):
+                    module.bias.requires_grad_(False)
+                module.eval()
+                module.track_running_stats = False
 
         """Lidar Backbone"""
         self.cenet = CENet(nclasses)
         w_dict = torch.load(
-            "logs/cenet_25_rangeaugs/SENet_valid_best",
+            "logs/cenet_100_rangeaugs/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 

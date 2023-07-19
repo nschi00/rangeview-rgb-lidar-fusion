@@ -6,16 +6,16 @@ train:
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
   aux_loss: False
-  subset_ratio: 0.25  # share of data used for training; overfit has to be false
+  subset_ratio: 1.0  # share of data used for training; overfit has to be false
   lamda: 1.0
-  batch_size: 6 # batch size
+  batch_size: 2 # batch size
   report_epoch: 1 # every x epochs, report validation set
   epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)
   save_summary: False # Summary of weight histograms for tensorboard   Must false since not check the api
   save_scans: True # False doesn't save anything, True saves som
   show_scans: True # show scans during training
   save_batch: 50
-  workers: 6 # number of threads to get data
+  workers: 2 # number of threads to get data
   max_epochs: 100
   #TODO: Change it back to 4
 

@@ -5,10 +5,10 @@ train:
   pipeline: "fusion"       #  "res" "rangeformer" "fusion"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
-  aux_loss: True
-  subset_ratio: 0.25  # share of data used for training; overfit has to be false
+  aux_loss: False
+  subset_ratio: 1.0  # share of data used for training; overfit has to be false
   lamda: 1.0
-  batch_size: 32         # batch size
+  batch_size: 4         # batch size
   report_epoch: 1        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
   save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api
@@ -16,7 +16,7 @@ train:
   show_scans: True       # show scans during training
   save_batch: 50
   max_epochs: 100
-  workers: 8            # number of threads to get data 
+  workers: 4           # number of threads to get data 
   #TODO: Change it back to 4
 
 ################################################################################
@@ -26,9 +26,10 @@ optimizer:
   Name: AdamW # AdamW, SGD
   F&B_mutiplier: 1.0 # Whether to use reduce the learning rate for the backbone and fusion module
   AdamW:
-    lr: 0.001
-    weight_decay: 0.0001
+    lr: 0.0001
+    weight_decay: 0.05
     betas: [0.9, 0.999]
+    eps: 1.0e-08
     amsgrad: False
   SGD:
     lr: 0.01
@@ -37,7 +38,7 @@ optimizer:
     dampening: 0
     nesterov: False
 scheduler:
-  Name: OneCycleLR # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
+  Name: None # CosineAnnealingWarmUpRestarts, OneCycleLR, ReduceLROnPlateau, None
   CosineAnnealingWarmupRestarts:
     first_cycle_steps : 50
     warmup_steps : 1
@@ -90,7 +91,7 @@ dataset:
     fov_up: 3
     fov_down: -25
     img_prop:
-      width: 512
+      width: 192
       height: 64
     img_means: #range,x,y,z,signal
       - 11.71279
