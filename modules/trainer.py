@@ -17,7 +17,8 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+# from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+from modules.network.new_cenet import CENet
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -128,9 +129,9 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        # self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
-        self.range_preprocess = RangePreprocess([0.,0.,0.,0.]) #Mix, Paste, Union, Shift
+        # self.range_preprocess = RangePreprocess([0.,0.,0.,0.]) #Mix, Paste, Union, Shift
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -155,7 +156,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                self.model = CENet(self.parser.get_n_classes())
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
@@ -436,8 +437,6 @@ class Trainer():
                 proj_mask = proj_mask.cuda()
                 rgb_data = rgb_data.cuda()
                 query_mask = query_mask.cuda()
-                if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
-                    print("FUCKING SHITTTTTTTTTTTTTT")
             # compute output
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":

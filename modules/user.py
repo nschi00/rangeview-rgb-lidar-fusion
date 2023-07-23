@@ -143,8 +143,6 @@ class User():
             proj_mask = proj_mask.cuda()
             rgb_data = rgb_data.cuda()
             query_mask = query_mask.cuda()
-            if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
-                print("FUCKING SHITTTTTTTTTTTTTT")
             if self.post:
                 proj_range = proj_range.cuda()
                 unproj_range = unproj_range.cuda()
