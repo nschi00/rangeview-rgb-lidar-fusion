@@ -155,7 +155,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+                self.model = Fusion(self.parser.get_n_classes())
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))

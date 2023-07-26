@@ -35,7 +35,7 @@ class Fusion(nn.Module):
     stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
     """
 
-    def __init__(self, nclasses, full_self_attn=False):
+    def __init__(self, nclasses):
 
         super(Fusion, self).__init__()
 
@@ -51,7 +51,7 @@ class Fusion(nn.Module):
         self.rgb_backbone = Backbone_RGB(nclasses)
 
         w_dict = torch.load(
-            "logs/mask2former_rgb_samelidarview_flip_100/SENet_valid_best",
+            "logs/mask2former_rgb_samelidarview_flip_100_768width/SENet_valid_best",
             map_location=lambda storage, loc: storage)
 
         self.rgb_backbone.load_state_dict(w_dict['state_dict'], strict=True)
@@ -78,7 +78,7 @@ class Fusion(nn.Module):
         """Lidar Backbone"""
         self.cenet = CENet(nclasses)
         w_dict = torch.load(
-            "logs/cenet_100_rangeaugs/SENet_valid_best",
+            "logs/cenet_100_rangeaugs_2048/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 
@@ -141,7 +141,7 @@ class Fusion(nn.Module):
         for i in range(bs):
             x_lidar_fusion_size.append(x_lidar_fusion_list[i].shape[2:])
             x_lidar_fusion.append(F.interpolate(x_lidar_fusion_list[i],
-                                       size=[64, 192], mode='bilinear', align_corners=False))
+                                       size=[64, 768], mode='bilinear', align_corners=False))
         x_lidar_fusion = torch.cat(x_lidar_fusion, dim=0)
 
         x_rgb = self.rgb_backbone(x_lidar_fusion, rgb)
@@ -242,7 +242,7 @@ class SwinFusion(nn.Module):
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
         # num_patches = 32768  ###TODO: change to image size multiplication
-        num_patches = 12288
+        num_patches = 12288 * 4
         # num_patches = 4830
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
