@@ -27,7 +27,7 @@ class LaserScan:
         self.only_rgb = True
         if self.only_rgb:
             self.proj_H = 64
-            self.proj_W = 192
+            self.proj_W = 768
             self.fov_vert = [-14, 5]
 
     def reset(self):

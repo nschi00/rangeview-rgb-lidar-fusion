@@ -11,3 +11,4 @@ __pycache__/
 !logs/test_baseline_25
 .vscode/launch.json
 third_party/*
+results/
