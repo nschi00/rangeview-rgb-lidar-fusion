@@ -472,10 +472,16 @@ class Trainer():
                 loss_m = loss_mn + bdlosss
                 output = out[0]
 
-            optimizer.zero_grad()
             scaler.scale(loss_m.sum()).backward()
-            scaler.step(optimizer)
-            scaler.update()
+
+            # Gradient accumulation
+            if (i + 1) % 4 == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+                # step scheduler
+                scheduler.step()
 
             # measure accuracy and record loss
             loss = loss_m.mean()
@@ -507,7 +513,6 @@ class Trainer():
             for g in self.optimizer.param_groups:
                 lr = g["lr"]
             learning_rate.update(lr, 1)
-
 
             if show_scans:
                 if i % self.ARCH["train"]["save_batch"] == 0:
@@ -551,8 +556,6 @@ class Trainer():
                     epoch, i, len(train_loader), batch_time=self.batch_time_t,
                     data_time=self.data_time_t, loss=losses, bd=bd, acc=acc, iou=iou, lr=lr,
                     iou_front=iou_front, estim=self.calculate_estimate(epoch, i)))
-            # step scheduler
-            scheduler.step()
 
         return acc.avg, iou.avg, losses.avg, iou_front.avg
 

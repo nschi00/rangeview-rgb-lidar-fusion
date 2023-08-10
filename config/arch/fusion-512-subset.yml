@@ -8,7 +8,7 @@ train:
   aux_loss: True
   subset_ratio: 1.0  # share of data used for training; overfit has to be false
   lamda: 1.0
-  batch_size: 3         # batch size
+  batch_size: 6         # batch size
   report_epoch: 1        # every x epochs, report validation set
   epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
   save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api
@@ -16,7 +16,7 @@ train:
   show_scans: True       # show scans during training
   save_batch: 50
   max_epochs: 100
-  workers: 3           # number of threads to get data 
+  workers: 6           # number of threads to get data 
   #TODO: Change it back to 4
 
 ################################################################################
