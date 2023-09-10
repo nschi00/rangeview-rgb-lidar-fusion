@@ -15,9 +15,9 @@ from modules.scheduler.warmupLR import *
 from modules.ioueval import *
 from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
-from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
+# from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+from modules.network.Fusion import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
@@ -436,8 +436,6 @@ class Trainer():
                 proj_mask = proj_mask.cuda()
                 rgb_data = rgb_data.cuda()
                 query_mask = query_mask.cuda()
-                if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
-                    print("FUCKING SHITTTTTTTTTTTTTT")
             # compute output
             with torch.cuda.amp.autocast():
                 if self.ARCH["train"]["pipeline"] == "rangeformer":

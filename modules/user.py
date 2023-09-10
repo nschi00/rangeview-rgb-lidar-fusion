@@ -8,7 +8,7 @@ import time
 import os
 import numpy as np
 from tqdm import tqdm   
-from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+from modules.network.Fusion import Fusion
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.new_cenet import CENet
@@ -143,8 +143,6 @@ class User():
             proj_mask = proj_mask.cuda()
             rgb_data = rgb_data.cuda()
             query_mask = query_mask.cuda()
-            if any(torch.sum(query_mask, dim=(1,2)) >= 6500):
-                print("FUCKING SHITTTTTTTTTTTTTT")
             if self.post:
                 proj_range = proj_range.cuda()
                 unproj_range = unproj_range.cuda()

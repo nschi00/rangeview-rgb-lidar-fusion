@@ -2,32 +2,31 @@
 # training parameters
 ################################################################################
 train:
-  pipeline: "fusion" #  "res" "fid" "hard"
-  act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
-  loss: "xentropy" #   must be either xentropy or iou
+  pipeline: "fusion"       #  "res" "rangeformer" "fusion"
+  act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
+  loss: "xentropy"      #   must be either xentropy or iou
   aux_loss: False
   subset_ratio: 1.0  # share of data used for training; overfit has to be false
   lamda: 1.0
-  batch_size: 1 # batch size
-  report_epoch: 1 # every x epochs, report validation set
-  epsilon_w: 0.001 # class weight w = 1 / (content + epsilon_w)
-  save_summary: False # Summary of weight histograms for tensorboard   Must false since not check the api
-  save_scans: True # False doesn't save anything, True saves som
-  show_scans: True # show scans during training
+  batch_size: 4         # batch size
+  report_epoch: 1        # every x epochs, report validation set
+  epsilon_w: 0.001       # class weight w = 1 / (content + epsilon_w)
+  save_summary: False    # Summary of weight histograms for tensorboard   Must false since not check the api
+  save_scans:  False     # False doesn't save anything, True saves som
+  show_scans: True       # show scans during training
   save_batch: 50
-  workers: 1 # number of threads to get data
   max_epochs: 100
-  #TODO: Change it back to 4
+  workers: 4           # number of threads to get data 
 
 ################################################################################
 # optimizer parameters
 ################################################################################
 optimizer:
   Name: AdamW # AdamW, SGD
-  F&B_mutiplier: 10.0 # Whether to use reduce the learning rate for the backbone and fusion module
+  F&B_mutiplier: 1.0 # Whether to use reduce the learning rate for the backbone and fusion module
   AdamW:
-    lr: 0.00001
-    weight_decay: 0.01
+    lr: 0.0001
+    weight_decay: 0.05
     betas: [0.9, 0.999]
     eps: 1.0e-08
     amsgrad: False
@@ -45,11 +44,11 @@ scheduler:
     cycle_mult : 1.
     max_lr : 0.1
     min_lr : 0.0001
-    gamma : 1.0
+    gamma : 1.
   OneCycleLR: # Old decay with warmup and cosine annealing 
     max_lr: 0.01 # Equal to optimizer.lr
     total_steps: 1000 # Equal to max_epochs * iterations_per_epoch
-    pct_start: 0.01 # The percentage of the cycle (in number of steps) spent increasing the learning rate (warmup).
+    pct_start: 0.02 # The percentage of the cycle (in number of steps) spent increasing the learning rate (warmup).
   ReduceLROnPlateau: # NOT TUNED
     mode: 'min'
     factor: 0.1
@@ -60,30 +59,18 @@ scheduler:
     cooldown: 0
     min_lr: 0
     eps: 1e-08
-
-################################################################################
-# fusion parameters
-################################################################################
-
-
-fusion: # only relevant if pipeline == "fusion"
-  fuse_all: "main_late" # "all_early", "all_late", "main_early" or "main_late"
-  branch_type: "semantic" # "semantic", "instance" or "panoptic"
-  name_backbone: "resnet50" # "resnet50" or "mask2former"
-  stage: "combination" # "enc", "pixel_decoder", "combination"
-  rgb_resize: False
-
+    
 ################################################################################
 # postproc parameters
 ################################################################################
 post:
   KNN:
     use: True # This parameter default is false
-    #     params:
-    #       knn: 5
-    #       search: 5
-    #       sigma: 1.0
-    #       cutoff: 1.0
+#     params:
+#       knn: 5
+#       search: 5
+#       sigma: 1.0
+#       cutoff: 1.0
     params:
       knn: 7
       search: 7
@@ -103,7 +90,7 @@ dataset:
     fov_up: 3
     fov_down: -25
     img_prop:
-      width: 2048
+      width: 384
       height: 64
     img_means: #range,x,y,z,signal
       - 11.71279
@@ -122,16 +109,16 @@ dataset:
 #       - -0.1023471
 #       - 0.4952
 #       - -1.0545
-#       - 0.2877
+#       - 0.2877  
 #       - 0.0035755096
-#       - 0.39993516
+#       - 0.39993516 
 #       - -0.0023758996
 #     img_stds: #range,x,y,z,signal
 #       - 10.24
 #       - 12.295865
 #       - 9.4287
 #       - 0.8643
-#       - 0.1450
+#       - 0.1450   
 #       - 0.44721574
 #       - 0.568866
 #       - 0.46991134
