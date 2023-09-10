@@ -24,7 +24,7 @@ def match_elements(n):
 
     return matches
 
-class RangePreprocess():
+class RangePreprocessFusion():
     def __init__(self, aug_prob = None) -> None:
         if aug_prob is None:
             self.aug_prob = [0.9, 0.2, 0.9, 1.0] #Mix, Paste, Union, Shift
@@ -57,14 +57,6 @@ class RangePreprocess():
         query_masks_out = []
         match_dict = match_elements(bs)
         for i in range(bs):
-            # if bs > 2:
-            #     j = random.randint(0, bs-1)
-            #     while j == i or matched_dict[j] == i:
-            #         j = random.randint(0, bs-1)
-            #     matched_dict[i] = j
-            # elif bs == 2:
-            #     j = 1 if i == 0 else 0
-            # else:
             j = i
                 
             scan_a, scan_b = data[i].clone(), data[j]

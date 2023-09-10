@@ -3,6 +3,7 @@
 ################################################################################
 train:
   pipeline: "fusion"       #  "res" "rangeformer" "fusion"
+  model: "cenet"       #  "cenet" "mask2former" "swinfusion"
   act: "Hardswish"      #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy"      #   must be either xentropy or iou
   aux_loss: True

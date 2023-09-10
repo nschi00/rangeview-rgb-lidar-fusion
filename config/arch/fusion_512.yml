@@ -2,7 +2,8 @@
 # training parameters
 ################################################################################
 train:
-  pipeline: "fusion" #  "res" "fid" "hard"
+  pipeline: "fusion" #  "res" "rangeformer" "fusion"
+  model: "swinfusion"       #  "cenet" "mask2former" "swinfusion"
   act: "Hardswish" #  "SiLU" "Hardswish" "LeakyReLU"
   loss: "xentropy" #   must be either xentropy or iou
   aux_loss: False
@@ -17,7 +18,6 @@ train:
   save_batch: 50
   workers: 2 # number of threads to get data
   max_epochs: 100
-  #TODO: Change it back to 4
 
 ################################################################################
 # optimizer parameters
@@ -60,18 +60,6 @@ scheduler:
     cooldown: 0
     min_lr: 0
     eps: 1e-08
-
-################################################################################
-# fusion parameters
-################################################################################
-
-
-fusion: # only relevant if pipeline == "fusion"
-  fuse_all: "main_late" # "all_early", "all_late", "main_early" or "main_late"
-  branch_type: "semantic" # "semantic", "instance" or "panoptic"
-  name_backbone: "resnet50" # "resnet50" or "mask2former"
-  stage: "combination" # "enc", "pixel_decoder", "combination"
-  rgb_resize: False
 
 ################################################################################
 # postproc parameters

@@ -9,7 +9,7 @@ import os
 import numpy as np
 from tqdm import tqdm   
 from modules.network.Fusion import Fusion
-from modules.network.RangePreprocess import RangePreprocess
+from modules.network.RangePreprocessFusion import RangePreprocessFusion
 from modules.network.ResNet import ResNet_34
 from modules.network.new_cenet import CENet
 from modules.network.RangeFormer import RangeFormer
@@ -117,7 +117,7 @@ class User():
 
   def infer_subset(self, loader, to_orig_fn,cnn,knn):
     # switch to evaluate mode
-    self.range_preprocess = RangePreprocess([0,0,0,0])
+    self.range_preprocess = RangePreprocessFusion([0,0,0,0])
     self.model.eval()
     total_time=0
     total_frames=0

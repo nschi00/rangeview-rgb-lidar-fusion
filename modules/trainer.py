@@ -18,7 +18,10 @@ from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 # from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
 from modules.network.Fusion import Fusion
-from modules.network.RangePreprocess import RangePreprocess
+from modules.network.new_cenet import CENet
+from modules.network.Mask2Former_RGB import Backbone_RGB
+from modules.network.RangePreprocessFusion import RangePreprocessFusion
+from modules.network.RangePreprocessLidar import RangePreprocessLidar
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
 from tqdm import tqdm
@@ -128,9 +131,12 @@ class Trainer():
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
                                           old_aug=True)
 
-        # self.range_preprocess = RangePreprocess([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
-        self.range_preprocess = RangePreprocess([0.,0.,0.,0.]) #Mix, Paste, Union, Shift
+        if self.ARCH["train"]["model"] == "cenet":
+            self.range_preprocess = RangePreprocessLidar([0.5,0.2,0.5,.8]) #Mix, Paste, Union, Shift
+        else:
+            self.range_preprocess = RangePreprocessFusion([0.,0.,0.,0.]) #Mix, Paste, Union, Shift
+
         # weights for loss (and bias)
 
         epsilon_w = self.ARCH["train"]["epsilon_w"]
@@ -155,8 +161,14 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes())
-                
+                if self.ARCH["train"]["model"] == "cenet":
+                    self.model = CENet(self.parser.get_n_classes())
+                elif self.ARCH["train"]["model"] == "swinfusion":
+                    self.model = Fusion(self.parser.get_n_classes(), self.ARCH["dataset"]["img_prop"])
+                elif self.ARCH["train"]["model"] == "mask2former":
+                    self.model = Backbone_RGB(self.parser.get_n_classes())
+                else:
+                    raise SyntaxError("Invalid name chosen. Choose one of 'cenet', 'swinfusion', or 'mask2former'.")
 
         save_to_log(self.log, 'model.txt', str(self.model))
         pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)

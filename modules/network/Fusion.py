@@ -35,9 +35,20 @@ class Fusion(nn.Module):
     stage: whether to only use the enc, pixel_decoder or combined pixel/transformer decoder output (combination)
     """
 
-    def __init__(self, nclasses):
+    def __init__(self, nclasses, img_prop):
 
         super(Fusion, self).__init__()
+
+        W, H = img_prop["width"], img_prop["height"]
+
+        if W == 512:
+            self.fusion_w = 192
+            self.fusion_h = 64
+        elif W == 1024:
+            self.fusion_w = 384
+            self.fusion_h = 64
+        else:
+            NotImplementedError("You have to design a proper fusion module on your own.")
 
         inplanes = 128
 
@@ -50,9 +61,16 @@ class Fusion(nn.Module):
         """RGB Backbone"""
         self.rgb_backbone = Backbone_RGB(nclasses)
 
-        w_dict = torch.load(
-            "logs/mask2former_rgb_samelidarview_flip_100_768width/SENet_valid_best",
-            map_location=lambda storage, loc: storage)
+        if W == 512:
+            w_dict = torch.load(
+                "logs/mask2former_rgb_samelidarview_flip_100/SENet_valid_best",
+                map_location=lambda storage, loc: storage)
+        elif W == 1024:
+            w_dict = torch.load(
+                "logs/mask2former_rgb_samelidarview_flip_100_384width/SENet_valid_best",
+                map_location=lambda storage, loc: storage)
+        else:
+            NotImplementedError("There is no pretrained model for this range-view resolution.")
 
         self.rgb_backbone.load_state_dict(w_dict['state_dict'], strict=True)
 
@@ -77,9 +95,18 @@ class Fusion(nn.Module):
 
         """Lidar Backbone"""
         self.cenet = CENet(nclasses)
-        w_dict = torch.load(
-            "logs/cenet_100_rangeaugs_2048/SENet_valid_best",
+
+        if W == 512:
+            w_dict = torch.load(
+            "logs/cenet_100_rangeaugs/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
+        elif W == 1024:
+            w_dict = torch.load(
+            "logs/cenet_100_rangeaugs_1024/SENet_valid_best",
+                                    map_location=lambda storage, loc: storage)
+        else:
+            NotImplementedError("There is no pretrained model for this range-view resolution.")
+
         self.cenet.load_state_dict(w_dict['state_dict'], strict=True)
 
         for param in self.cenet.parameters():
@@ -108,7 +135,7 @@ class Fusion(nn.Module):
         self.fusion_layer = SwinFusion(upscale=upscale, img_size=(height, width), Fusion_depths=self.Fusion_depths,
                     window_size=window_size, embed_dim=128, Fusion_num_heads=self.Fusion_num_heads,
                     Re_num_heads=[8], Re_depths=[4], mlp_ratio=2, upsampler='', in_chans=128, ape=True,
-                    drop_path_rate=0.)
+                    drop_path_rate=0., img_h=self.fusion_h, img_w=self.fusion_w)
         
         self.bn_fusion = nn.BatchNorm2d(inplanes)
 
@@ -141,7 +168,7 @@ class Fusion(nn.Module):
         for i in range(bs):
             x_lidar_fusion_size.append(x_lidar_fusion_list[i].shape[2:])
             x_lidar_fusion.append(F.interpolate(x_lidar_fusion_list[i],
-                                       size=[64, 768], mode='bilinear', align_corners=False))
+                                       size=[self.fusion_h, self.fusion_w], mode='bilinear', align_corners=False))
         x_lidar_fusion = torch.cat(x_lidar_fusion, dim=0)
 
         x_rgb = self.rgb_backbone(x_lidar_fusion, rgb)
@@ -215,7 +242,7 @@ class SwinFusion(nn.Module):
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, upscale=2, upsampler='', resi_connection='1conv',
-                 **kwargs):
+                 img_w=192, img_h=64, **kwargs):
         super(SwinFusion, self).__init__()
         num_out_ch = in_chans
         num_feat = 64
@@ -241,9 +268,7 @@ class SwinFusion(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=embed_dim, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
-        # num_patches = 32768  ###TODO: change to image size multiplication
-        num_patches = 12288 * 4
-        # num_patches = 4830
+        num_patches = img_h * img_w
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
