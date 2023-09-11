@@ -13,6 +13,7 @@ from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.new_cenet import CENet
 from modules.network.RangeFormer import RangeFormer
+from modules.network.Mask2Former_RGB import Backbone_RGB
 from postproc.KNN import KNN
 
 def convert_relu_to_softplus(model, act):
@@ -59,7 +60,7 @@ class User():
         elif self.ARCH["train"]["pipeline"] == "rangeformer":
             self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
         elif self.ARCH["train"]["pipeline"] == "fusion":
-            self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
+            self.model = Backbone_RGB(self.parser.get_n_classes())
             #self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
 #     print(self.model)
     w_dict = torch.load(modeldir + "/SENet_valid_best",

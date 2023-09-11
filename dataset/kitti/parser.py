@@ -9,7 +9,6 @@ import torch
 import random
 from PIL import Image
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -91,10 +90,10 @@ class SemanticKitti(Dataset):
     if self.transform:
       if old_aug:
         self.aug_prob = {"scaling": 0.0,
-                         "rotation": 0.5,
-                         "jittering": 0.5,
+                         "rotation": 0.0,
+                         "jittering": 0.0,
                          "flipping": 0.5,
-                         "point_dropping": [0.5, 0.5],
+                         "point_dropping": [-1., -1.],
                          "type": "old"}
       else:
         self.aug_prob = {"scaling": 1.0,
@@ -110,18 +109,18 @@ class SemanticKitti(Dataset):
                            "V_flip": 0.,}
                            
       ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
-      self.flip = TF.RandomHorizontalFlip(p=1.0)
-      self.img_transform = TF.Compose([TF.ToTensor(),
-                                      ColorJitter,
+      self.img_transform = TF.Compose([ColorJitter,
                                       TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
                                       TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
-                                     TF.Resize((376, 1240)),
+                                     TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
-      self.aug_prob = None
-      self.img_transform = TF.Compose([TF.ToTensor(),
-                                     TF.Resize((376, 1240)),
+      self.aug_prob = defaultdict(lambda: -1.0)
+      self.aug_prob["point_dropping"] = [-1.0, -1.0]
+      self.img_transform = TF.Compose([TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+      
+    self.img_to_tensor = TF.ToTensor()
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -216,8 +215,7 @@ class SemanticKitti(Dataset):
                        aug_prob=self.aug_prob)
 
     # open and obtain scan
-    scan.rgb_size = rgb_data._size
-    scan.open_scan(scan_file)
+    scan.open_scan(scan_file, rgb_data)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -296,10 +294,14 @@ class SemanticKitti(Dataset):
                       proj_remission, 
                       unproj_remissions, 
                       unproj_n_points]
+    
+    rgb_data = self.img_to_tensor(rgb_data)
+    rgb_data = rgb_data[:, scan.min_v:, :]
     rgb_data = self.img_transform(rgb_data)
 
     if scan.flag_flip:
-      rgb_data = self.flip(rgb_data)
+      rgb_flip = TF.RandomHorizontalFlip(p=1.0)
+      rgb_data = rgb_flip(rgb_data)
 
     # return
     return projected_data, rgb_data

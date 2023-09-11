@@ -7,7 +7,6 @@ import math
 import random
 from scipy.spatial.transform import Rotation as R
 import cv2
-from collections import defaultdict
 from PIL import Image, ImageDraw
 from matplotlib import pyplot as plt
 # import vispy
@@ -23,14 +22,13 @@ class LaserScan:
         self.proj_W = W
         self.proj_fov_up = fov_up
         self.proj_fov_down = fov_down
-        if aug_prob != None:
-            self.aug_prob = aug_prob
-        else:
-            self.aug_prob = defaultdict(lambda: -1.0)
-            self.aug_prob["point_dropping"] = [-1.0, -1.0]
-            self.aug_prob["flipped"] = False
-        self.rgb_size = (1240, 376) # *(W,H): Dummy size to prevent error 
+        self.aug_prob = aug_prob
         self.reset()
+        self.only_rgb = True
+        if self.only_rgb:
+            self.proj_H = 64
+            self.proj_W = 768
+            self.fov_vert = [-14, 5]
 
     def reset(self):
         """ Reset scan members. """
@@ -72,12 +70,13 @@ class LaserScan:
     def __len__(self):
         return self.size()
 
-    def open_scan(self, filename):
+    def open_scan(self, filename, rgb_data):
         """ Open raw scan and fill in attributes
         """
         # reset just in case there was an open structure
         self.reset()
 
+        self.rgb_data = rgb_data
         self.filename = filename
 
         # check filename is string
@@ -107,11 +106,15 @@ class LaserScan:
             remissions = np.delete(remissions,self.points_to_drop)
         else:
             self.drop_points = False
-
+        
         fov_hor = [-90, 90]
         fov_vert = [-90, 90]
         mask_camera_fov = self.points_basic_filter(points, fov_hor, fov_vert)
-        self.point_idx_camera_fov = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
+        self.point_idx_camera_fov, self.min_v = self.get_lidar_points_in_image_plane(points, mask_camera_fov)
+
+        if self.only_rgb:
+            points = points[self.point_idx_camera_fov]
+            remissions = remissions[self.point_idx_camera_fov]
 
         self.set_points(points, remissions)
 
@@ -260,8 +263,13 @@ class LaserScan:
         pitch = np.arcsin(scan_z / depth)
 
         # get projections in image coords
-        proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
-        proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
+        if self.only_rgb:
+            fov_vert = np.asarray(self.fov_vert) / 180.0 * np.pi
+            proj_x = abs((yaw) - (yaw.min())) / abs((yaw.min()) - (yaw.max())) # using yaw due to varying values for fov_hor
+            proj_y = 1.0 - (pitch + abs(fov_vert[0])) / abs(fov_vert[0]-fov_vert[1])  # in [0.0, 1.0]
+        else:
+            proj_x = 0.5 * (yaw / np.pi + 1.0)  # in [0.0, 1.0]
+            proj_y = 1.0 - (pitch + abs(fov_down)) / fov  # in [0.0, 1.0]
 
         # scale to image size using angular resolution
         proj_x *= self.proj_W  # in [0.0, W]
@@ -392,14 +400,16 @@ class LaserScan:
         proj_points_im[:, 1] /= proj_points_im[:, 2]
         proj_points_im = proj_points_im[:, 0:2]
 
-        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_size[0])
-        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_size[1])
+        condition_col1 = (proj_points_im[:, 0] >= 0) & (proj_points_im[:, 0] < self.rgb_data._size[0])
+        condition_col2 = (proj_points_im[:, 1] >= 0) & (proj_points_im[:, 1] < self.rgb_data._size[1])
 
         combined_condition = condition_col1 & condition_col2 & mask_fov
 
         indices = np.nonzero(combined_condition)[0]
 
-        return indices
+        min_v = proj_points_im[:, 1][combined_condition].min().astype('int')
+
+        return indices, min_v
 
     ### Code from https://github.com/Jiang-Muyun/Open3D-Semantic-KITTI-Vis.git
     def hv_in_range(self, m, n, fov, fov_type='h'):
@@ -600,6 +610,10 @@ class SemLaserScan(LaserScan):
 
         if self.drop_points is not False:
             label = np.delete(label,self.points_to_drop)
+
+        if len(label) != len(self.point_idx_camera_fov):
+            label = label[self.point_idx_camera_fov] if self.only_rgb else label
+
         # set it
         self.set_label(label)
 

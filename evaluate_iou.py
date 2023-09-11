@@ -7,6 +7,8 @@ import yaml
 import sys
 import numpy as np
 import torch
+from PIL import Image
+from collections import defaultdict
 
 from modules.ioueval import iouEval
 from common.laserscan import SemLaserScan
@@ -59,6 +61,20 @@ def eval(test_sequences,splits,pred):
         pred_names.extend(seq_pred_names)
     # print(pred_names)
 
+    rgb_files = []
+    # fill in with names, checking that all sequences are complete
+    for sequence in test_sequences:
+      # to string
+      sequence = '{0:02d}'.format(int(sequence))
+      rgb_paths = os.path.join(FLAGS.dataset, "sequences", sequence, "image_2")
+
+      # get files
+      seq_rgb_files = [os.path.join(dp, f) for dp, dn, fn in os.walk(
+          os.path.expanduser(rgb_paths)) for f in fn if ".png" in f]
+
+      # extend list
+      rgb_files.extend(seq_rgb_files)
+
 #     tt = 1000
 #     scan_names = scan_names[0:tt]
 #     label_names = label_names[0:tt]
@@ -68,32 +84,36 @@ def eval(test_sequences,splits,pred):
     # print("labels: ", len(label_names))
     # print("predictions: ", len(pred_names))
     assert (len(label_names) == len(scan_names) and
-            len(label_names) == len(pred_names))
+            len(label_names) == len(pred_names) and
+            len(label_names) == len(rgb_files))
+
+    aug_prob = defaultdict(lambda: -1.0)
+    aug_prob["point_dropping"] = [-1.0, -1.0]
 
     print("Evaluating sequences: ")
     # open each file, get the tensor, and make the iou comparison
-    for scan_file, label_file, pred_file in zip(scan_names, label_names, pred_names):
+    for scan_file, label_file, pred_file, rgb_file in zip(scan_names, label_names, pred_names, rgb_files):
         print("evaluating label ", label_file, "with", pred_file)
         # open label
-        label = SemLaserScan(project=False)
-        label.open_scan(scan_file)
+        rgb_data = Image.open(rgb_file)
+        label = SemLaserScan(project=False, aug_prob=aug_prob)
+        label.open_scan(scan_file, rgb_data)
         label.open_label(label_file)
         u_label_sem = remap_lut[label.sem_label]  # remap to xentropy format
         if FLAGS.limit is not None:
             u_label_sem = u_label_sem[:FLAGS.limit]
 
         # open prediction
-        pred = SemLaserScan(project=False)
-        pred.open_scan(scan_file)
+        pred = SemLaserScan(project=False, aug_prob=aug_prob)
+        pred.open_scan(scan_file, rgb_data)
         pred.open_label(pred_file)
-        front_points = pred.point_idx_camera_fov
         u_pred_sem = remap_lut[pred.sem_label]  # remap to xentropy format
         if FLAGS.limit is not None:
             u_pred_sem = u_pred_sem[:FLAGS.limit]
 
         # add single scan to evaluation
         evaluator.addBatch(u_pred_sem, u_label_sem)
-        front_evaluator.addBatch(u_pred_sem[front_points], u_label_sem[front_points])
+        front_evaluator.addBatch(u_pred_sem, u_label_sem)
 
     # when I am done, print the evaluation
     m_accuracy = evaluator.getacc()

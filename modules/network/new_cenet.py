@@ -23,7 +23,7 @@ class CENet(nn.Module):
         print("Fusion model initialized")
         
     def forward(self, lidar, rgb):
-
+        lidar, _, mask_front = lidar[:, :5, :, :], lidar[:, 5, :, :].bool(), lidar[:, 6, :, :].bool()
         # with torch.no_grad():
         B, _, H, W = lidar.shape
         lidar_out = self.lidar_model(lidar, rgb)
@@ -32,7 +32,7 @@ class CENet(nn.Module):
         
         fused_pred = F.softmax(self.prediction(lidar_feature), dim=1)
         out = [fused_pred] + lidar_out
-        return out, lidar_feature
+        return out
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

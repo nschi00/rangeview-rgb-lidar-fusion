@@ -17,10 +17,11 @@ from modules.losses.Lovasz_Softmax import Lovasz_softmax
 from modules.scheduler.cosine import CosineAnnealingWarmUpRestarts
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 from torch.optim.lr_scheduler import OneCycleLR
-from modules.network.Fusion_pretrained_backbonesv2 import Fusion
+from modules.network.new_cenet import CENet
 from modules.network.RangePreprocess import RangePreprocess
 from modules.network.ResNet import ResNet_34
 from modules.network.RangeFormer import RangeFormer
+from modules.network.Mask2Former_RGB import Backbone_RGB
 from tqdm import tqdm
 
 def get_Optim(model, config, iter_per_epoch = None):
@@ -155,7 +156,7 @@ class Trainer():
             elif self.ARCH["train"]["pipeline"] == "rangeformer":
                 self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
             elif self.ARCH["train"]["pipeline"] == "fusion":
-                self.model = Fusion(self.parser.get_n_classes())
+                self.model = Backbone_RGB(self.parser.get_n_classes())
                 
 
         save_to_log(self.log, 'model.txt', str(self.model))
