@@ -377,7 +377,8 @@ class Parser():
                gt=True,           # get gt?
                shuffle_train=True,
                subset_ratio=1.0,
-               old_aug = True):
+               old_aug = True,
+               only_RGB=False):
     super(Parser, self).__init__()
 
     # if I am training, get the dataset
@@ -395,6 +396,7 @@ class Parser():
     self.workers = workers
     self.gt = gt
     self.shuffle_train = shuffle_train
+    self.only_RGB = only_RGB
 
     # number of classes that matters is the one for xentropy
     self.nclasses = len(self.learning_map_inv)
@@ -410,7 +412,8 @@ class Parser():
                                        max_points=max_points,
                                        transform=True,
                                        gt=self.gt,
-                                       old_aug=old_aug)
+                                       old_aug=old_aug,
+                                       only_RGB=only_RGB)
     
     self.valid_dataset = SemanticKitti(root=self.root,
                                        sequences=self.valid_sequences,
@@ -420,7 +423,8 @@ class Parser():
                                        learning_map_inv=self.learning_map_inv,
                                        sensor=self.sensor,
                                        max_points=max_points,
-                                       gt=self.gt)
+                                       gt=self.gt,
+                                       only_RGB=only_RGB)
 
 
     def seed_worker(worker_id):
