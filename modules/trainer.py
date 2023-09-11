@@ -129,7 +129,8 @@ class Trainer():
                                           gt=True,
                                           shuffle_train=True,
                                           subset_ratio=self.ARCH["train"]["subset_ratio"],
-                                          old_aug=True)
+                                          old_aug=True,
+                                          only_RGB=(self.ARCH["train"]["model"]=="mask2former"))
 
         #self.range_preprocess = RangePreprocess([0.,0.,0.,.8]) #Mix, Paste, Union, Shift
         if self.ARCH["train"]["model"] == "cenet":
@@ -456,10 +457,16 @@ class Trainer():
                                                                           proj_labels, 
                                                                           training=train)
                 elif self.ARCH["train"]["pipeline"] == "fusion":
-                    in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                    if self.ARCH["train"]["model"] == "mask2former":
+                        in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
                                                                           [proj_mask, query_mask], 
                                                                           proj_labels,
-                                                                          training=train)
+                                                                          training=False)
+                    else:
+                        in_vol, proj_mask, proj_labels = self.range_preprocess(in_vol, 
+                                                                            [proj_mask, query_mask], 
+                                                                            proj_labels,
+                                                                            training=train)
                 else:
                     in_vol, _, proj_labels = self.range_preprocess(in_vol, 
                                                                    [None, None], 

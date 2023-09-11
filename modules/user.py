@@ -12,6 +12,7 @@ from modules.network.Fusion import Fusion
 from modules.network.RangePreprocessFusion import RangePreprocessFusion
 from modules.network.ResNet import ResNet_34
 from modules.network.new_cenet import CENet
+from modules.network.Mask2Former_RGB import Backbone_RGB
 from modules.network.RangeFormer import RangeFormer
 from postproc.KNN import KNN
 
@@ -54,13 +55,19 @@ class User():
         torch.nn.Module.dump_patches = True
         activation = eval("nn." + self.ARCH["train"]["act"] + "()")
         if self.ARCH["train"]["pipeline"] == "res":
-            self.model = CENet(self.parser.get_n_classes())
+            self.model = ResNet_34(self.parser.get_n_classes())
             convert_relu_to_softplus(self.model, activation)
         elif self.ARCH["train"]["pipeline"] == "rangeformer":
             self.model = RangeFormer(self.parser.get_n_classes(), self.parser.get_resolution())
         elif self.ARCH["train"]["pipeline"] == "fusion":
-            self.model = Fusion(self.parser.get_n_classes(), full_self_attn=False)
-            #self.model = Fusion_2(self.parser.get_n_classes(), full_self_attn=False)
+            if self.ARCH["train"]["model"] == "cenet":
+                self.model = CENet(self.parser.get_n_classes())
+            elif self.ARCH["train"]["model"] == "swinfusion":
+                self.model = Fusion(self.parser.get_n_classes(), self.ARCH["dataset"]["img_prop"])
+            elif self.ARCH["train"]["model"] == "mask2former":
+                self.model = Backbone_RGB(self.parser.get_n_classes())
+            else:
+                raise SyntaxError("Invalid name chosen. Choose one of 'cenet', 'swinfusion', or 'mask2former'.")
 #     print(self.model)
     w_dict = torch.load(modeldir + "/SENet_valid_best",
                         map_location=lambda storage, loc: storage)

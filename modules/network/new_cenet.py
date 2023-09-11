@@ -24,7 +24,7 @@ class CENet(nn.Module):
 
     def forward(self, lidar, rgb):
         if lidar.shape[1] != 5:
-            lidar, _, mask_front = lidar[:, :5, :, :], lidar[:, 5, :, :].bool(), lidar[:, 6, :, :].bool()
+            lidar, _, _ = lidar[:, :5, :, :], lidar[:, 5, :, :].bool(), lidar[:, 6, :, :].bool()
         else:
             self.flag_independent = False
 

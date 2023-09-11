@@ -24,6 +24,9 @@ class Backbone_RGB(nn.Module):
 
     def forward(self, lidar, x):
 
+        if lidar.shape[1] != 5:
+            lidar, _, _ = lidar[:, :5, :, :], lidar[:, 5, :, :].bool(), lidar[:, 6, :, :].bool()
+
         target_size = lidar.shape[2:4]
         bs = lidar.shape[0]
 

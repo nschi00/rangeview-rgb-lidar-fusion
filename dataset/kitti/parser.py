@@ -4,12 +4,10 @@ import torch
 from torch.utils.data import Dataset
 from common.laserscan import LaserScan, SemLaserScan
 import torchvision.transforms as TF
-from collections import defaultdict
 import torch
 import random
 from PIL import Image
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 EXTENSIONS_SCAN = ['.bin']
@@ -67,7 +65,8 @@ class SemanticKitti(Dataset):
                max_points=150000,   # max number of points present in dataset
                gt=True,
                transform=False,
-               old_aug=True):            # send ground truth?
+               old_aug=True,
+               only_RGB=False):            # send ground truth?
     # save deats
     self.root = os.path.join(root, "sequences")
     self.sequences = sequences
@@ -87,15 +86,24 @@ class SemanticKitti(Dataset):
     self.max_points = max_points
     self.gt = gt
     self.transform = transform
+    self.only_RGB = only_RGB
     
     if self.transform:
       if old_aug:
-        self.aug_prob = {"scaling": 0.0,
-                         "rotation": 0.5,
-                         "jittering": 0.5,
+        if self.only_RGB:
+          self.aug_prob = {"scaling": 0.0,
+                         "rotation": 0.0,
+                         "jittering": 0.0,
                          "flipping": 0.5,
-                         "point_dropping": [0.5, 0.5],
+                         "point_dropping": [-1., -1.],
                          "type": "old"}
+        else:
+          self.aug_prob = {"scaling": 0.0,
+                          "rotation": 0.5,
+                          "jittering": 0.5,
+                          "flipping": 0.5,
+                          "point_dropping": [0.5, 0.5],
+                          "type": "old"}
       else:
         self.aug_prob = {"scaling": 1.0,
                         "rotation": 1.0,
@@ -111,17 +119,29 @@ class SemanticKitti(Dataset):
                            
       ColorJitter = TF.RandomApply(torch.nn.ModuleList([TF.ColorJitter(0.2, 0.2, 0.2, 0.2)]), p=self.img_aug_prob["C_jittering"])
       self.flip = TF.RandomHorizontalFlip(p=1.0)
-      self.img_transform = TF.Compose([TF.ToTensor(),
-                                      ColorJitter,
+      if self.only_RGB:
+        self.img_transform = TF.Compose([ColorJitter,
                                       TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
                                       TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
-                                     TF.Resize((376, 1240)),
+                                     TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+      else:
+        self.img_transform = TF.Compose([TF.ToTensor(),
+                                        ColorJitter,
+                                        TF.RandomHorizontalFlip(p=self.img_aug_prob["H_flip"]),
+                                        TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
+                                      TF.Resize((376, 1240)),
+                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     else:
       self.aug_prob = None
-      self.img_transform = TF.Compose([TF.ToTensor(),
-                                     TF.Resize((376, 1240)),
+      if self.only_RGB:
+        self.img_transform = TF.Compose([TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+        self.img_to_tensor = TF.ToTensor()
+      else:
+        self.img_transform = TF.Compose([TF.ToTensor(),
+                                      TF.Resize((376, 1240)),
+                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     
     # get number of classes (can't be len(self.learning_map) because there
     # are multiple repeated entries, so the number that matters is how many
@@ -206,18 +226,20 @@ class SemanticKitti(Dataset):
                           W=self.sensor_img_W,
                           fov_up=self.sensor_fov_up,
                           fov_down=self.sensor_fov_down,
-                          aug_prob=self.aug_prob)
+                          aug_prob=self.aug_prob,
+                          only_rgb=self.only_RGB)
     else:
       scan = LaserScan(project=True,
                        H=self.sensor_img_H,
                        W=self.sensor_img_W,
                        fov_up=self.sensor_fov_up,
                        fov_down=self.sensor_fov_down,
-                       aug_prob=self.aug_prob)
+                       aug_prob=self.aug_prob,
+                       only_rgb=self.only_RGB)
 
     # open and obtain scan
     scan.rgb_size = rgb_data._size
-    scan.open_scan(scan_file)
+    scan.open_scan(scan_file, rgb_data)
     if self.gt:
       scan.open_label(label_file)
       # map unused classes to used classes (also for projection)
@@ -296,6 +318,9 @@ class SemanticKitti(Dataset):
                       proj_remission, 
                       unproj_remissions, 
                       unproj_n_points]
+    if self.only_RGB:
+      rgb_data = self.img_to_tensor(rgb_data)
+      rgb_data = rgb_data[:, scan.min_v:, :]
     rgb_data = self.img_transform(rgb_data)
 
     if scan.flag_flip:
