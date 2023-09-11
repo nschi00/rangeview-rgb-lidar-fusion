@@ -48,7 +48,8 @@ class User():
                         batch_size=1,
                         workers=0,
                         gt=True,
-                        shuffle_train=False)
+                        shuffle_train=False,
+                        only_RGB=self.ARCH["train"]["model"] == "mask2former")
 
     # concatenate the encoder and the head
     with torch.no_grad():
@@ -63,7 +64,7 @@ class User():
             if self.ARCH["train"]["model"] == "cenet":
                 self.model = CENet(self.parser.get_n_classes())
             elif self.ARCH["train"]["model"] == "swinfusion":
-                self.model = Fusion(self.parser.get_n_classes(), self.ARCH["dataset"]["img_prop"])
+                self.model = Fusion(self.parser.get_n_classes(), self.ARCH["dataset"]["sensor"]["img_prop"])
             elif self.ARCH["train"]["model"] == "mask2former":
                 self.model = Backbone_RGB(self.parser.get_n_classes())
             else:

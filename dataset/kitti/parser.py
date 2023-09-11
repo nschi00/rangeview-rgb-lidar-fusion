@@ -125,6 +125,7 @@ class SemanticKitti(Dataset):
                                       TF.RandomVerticalFlip(p=self.img_aug_prob["V_flip"]),
                                      TF.Resize((280, 1240)),
                                      TF.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+        self.img_to_tensor = TF.ToTensor()
       else:
         self.img_transform = TF.Compose([TF.ToTensor(),
                                         ColorJitter,

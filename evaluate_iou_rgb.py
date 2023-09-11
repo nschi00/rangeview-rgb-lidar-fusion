@@ -96,7 +96,7 @@ def eval(test_sequences,splits,pred):
         print("evaluating label ", label_file, "with", pred_file)
         # open label
         rgb_data = Image.open(rgb_file)
-        label = SemLaserScan(project=False, aug_prob=aug_prob)
+        label = SemLaserScan(project=False, aug_prob=aug_prob, only_rgb=True)
         label.open_scan(scan_file, rgb_data)
         label.open_label(label_file)
         u_label_sem = remap_lut[label.sem_label]  # remap to xentropy format
@@ -104,7 +104,7 @@ def eval(test_sequences,splits,pred):
             u_label_sem = u_label_sem[:FLAGS.limit]
 
         # open prediction
-        pred = SemLaserScan(project=False, aug_prob=aug_prob)
+        pred = SemLaserScan(project=False, aug_prob=aug_prob, only_rgb=True)
         pred.open_scan(scan_file, rgb_data)
         pred.open_label(pred_file)
         u_pred_sem = remap_lut[pred.sem_label]  # remap to xentropy format

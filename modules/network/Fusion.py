@@ -12,10 +12,6 @@ from new_cenet import CENet
 from Mask2Former_RGB import Backbone_RGB
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
-
-from typing import List, Optional, Tuple
-
 
 """ This is a torch way of getting the intermediate layers
  return_layers = {"layer4": "out"}
@@ -102,7 +98,7 @@ class Fusion(nn.Module):
                                     map_location=lambda storage, loc: storage)
         elif W == 1024:
             w_dict = torch.load(
-            "logs/cenet_100_rangeaugs_1024/SENet_valid_best",
+            "logs/cenet_100_1024_rangeaugs/SENet_valid_best",
                                     map_location=lambda storage, loc: storage)
         else:
             NotImplementedError("There is no pretrained model for this range-view resolution.")
