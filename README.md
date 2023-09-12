@@ -21,27 +21,32 @@ Download SemanticKITTI from their [official website](http://www.semantic-kitti.o
 - RGB backbone fine-tuning on SemanticKITTI dataset with range-view labels:
     - for usage with 512 x 64 model:
       ```bash
-        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_512.yml -n mask2former_512
+        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_512.yml \
+       -n mask2former_512
       ```
     - for usage with 1024 x 64 model:
       ```bash
-        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_1024.yml -n mask2former_1024
+        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_1024.yml \
+      -n mask2former_1024
       ```
 
 - Fusion Model:
     - 512 x 64 range-view (RV) resolution:
       ```bash
-        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_512.yml -n fusion_512
+        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_512.yml \
+      -n fusion_512
       ```
     - 1024 x 64 RV resolution:
       ```bash
-        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_1024.yml -n fusion_1024
+        python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_1024.yml \
+      -n fusion_1024
       ```
 
 ### Infer and Evaluation：
 - Infer:
   ```bash
-    python infer.py -d /path/to/SemanticKITTI/dataset -l /path/to/save/predictions/in -m path/to/trained_model
+    python infer.py -d /path/to/SemanticKITTI/dataset -l /path/to/save/predictions/in \
+  -m path/to/trained_model
   ```
 
 - Evalulation:
@@ -62,7 +67,8 @@ Download SemanticKITTI from their [official website](http://www.semantic-kitti.o
 
 - Visualize Predictions:
   ```bash
-  python visualize.py -w kitti -d /path/to/SemanticKITTI/dataset -p /path/to/predictions -s which_sequences
+  python visualize.py -w kitti -d /path/to/SemanticKITTI/dataset -p /path/to/predictions \
+  -s which_sequences
   ```
 
 
