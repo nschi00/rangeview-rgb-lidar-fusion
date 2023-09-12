@@ -8,7 +8,7 @@ Download SemanticKITTI from their [official website](http://www.semantic-kitti.o
 ### Train：
 - Lidar backbone with Range Augmentations (RA):
     - 512 x 64 range-view (RV) resolution:
-        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/cenet_512.yml -n cenet_512_RA`
+        ```python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/cenet_512.yml -n cenet_512_RA```
     - 1024 x 64 RV resolution (retrain from 512 x 64 checkpoint as the authors of CENet recommend):
         `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/cenet_1024.yml -p /path/to/cenet_512_RA -n cenet_1024_RA`
 
