@@ -2,39 +2,46 @@
 Code for our project "Multimodal Range View Based Semantic Segmentation" for the course "Deep Learning for 3D Perception" at the Technical University of Munich under supervision of Prof. Angela Dai.
 
 ## Prepare:
-Download SemanticKITTI from [official web](http://www.semantic-kitti.org/dataset.html). Download SemanticPOSS from [official web](http://www.poss.pku.edu.cn./download.html).
+Download SemanticKITTI from their [official website](http://www.semantic-kitti.org/dataset.html).
 
 ## Usage：
 ### Train：
-- SemanticKITTI:
+- Lidar backbone with Range Augmentations (RA):
+    - 512 x 64 range-view (RV) resolution:
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/cenet_512.yml -n cenet_512_RA`
+    - 1024 x 64 RV resolution (retrain from 512 x 64 checkpoint as the authors of CENet recommend):
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/cenet_1024.yml -p /path/to/cenet_512_RA -n cenet_1024_RA`
 
-    `python train.py -d /your_dataset -ac config/arch/senet-512.yml -n senet-512`
+- RGB backbone fine-tuning on SemanticKITTI dataset with range-view labels:
+    - for usage with 512 x 64 model:
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_512.yml -n mask2former_512`
+    - for usage with 1024 x 64 model:
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/mask2former_1024.yml -n mask2former_1024`
 
-    Note that the following training strategy is used due to GPU and time constraints, see [kitti.sh](https://github.com/huixiancheng/SENet/blob/main/kitti.sh) for details.
+- Fusion Model:
+    - 512 x 64 range-view (RV) resolution:
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_512.yml -n fusion_512`
+    - 1024 x 64 RV resolution:
+        `python train.py -d /path/to/SemanticKITTI/dataset -ac config/arch/fusion_1024.yml -n fusion_1024`
 
-    First train the model with 64x512 inputs. Then load the pre-trained model to train the model with 64x1024 inputs, and finally load the pre-trained model to train the model with 64x2048 inputs.
+### Infer and Evaluation：
+- Infer:
+    `python infer.py -d /path/to/SemanticKITTI/dataset -l /path/to/save/predictions/in -m path/to/trained_model
 
-### Infer and Eval：
-- SemanticKITTI:
-
-    `python infer.py -d /your_dataset -l /your_predictions_path -m trained_model -s valid/test`
-    
-    Eval for valid sequences:
-
-    `python evaluate_iou.py -d /your_dataset -p /your_predictions_path`
-
-    This will generate both predictions and mIoU results.
+- Evalulation:
+    - Lidar and fusion models:
+        `python evaluate_iou.py -d /path/to/SemanticKITTI/dataset -p /path/to/predictions`
+    - RGB models:
+        `python evaluate_iou_rgb.py -d /path/to/SemanticKITTI/dataset -p /path/to/predictions`
 
 ### Visualize Example:
-
-
 - Visualize GT:
 
-  `python visualize.py -w kitti -d /your_dataset -s what_sequences`
+  `python visualize.py -w kitti -d /path/to/SemanticKITTI/dataset -s which_sequences`
 
 - Visualize Predictions:
 
-  `python visualize.py -w kitti -d /your_dataset -p /your_predictions -s what_sequences`
+  `python visualize.py -w kitti -d /path/to/SemanticKITTI/dataset -p /path/to/predictions -s which_sequences`
 
 
 ## Pretrained Models and Logs:
