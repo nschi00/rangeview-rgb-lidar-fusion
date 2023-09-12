@@ -1,5 +1,5 @@
 # Multimodal Range View Based Semantic Segmentation
-Code for our project "Multimodal Range View Based Semantic Segmentation" for the course "Deep Learning for 3D Perception" at the Technical University of Munich under supervision of Prof. Angela Dai.
+Code for our project "Multimodal Range View Based Semantic Segmentation" of the course "Deep Learning for 3D Perception" at the Technical University of Munich under supervision of Prof. Angela Dai.
 
 ## Prepare:
 Download SemanticKITTI from their [official website](http://www.semantic-kitti.org/dataset.html).
