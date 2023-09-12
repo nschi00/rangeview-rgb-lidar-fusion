@@ -68,7 +68,7 @@ Download SemanticKITTI from their [official website](http://www.semantic-kitti.o
 - Visualize Predictions:
   ```bash
   python visualize.py -w kitti -d /path/to/SemanticKITTI/dataset -p /path/to/predictions \
-  -s which_sequences
+      -s which_sequences
   ```
 
 
